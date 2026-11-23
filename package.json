@@ -7,6 +7,14 @@
   "author": "Seak Kimhour",
   "icon": "images/icon.png",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ThunHour/env-lock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ThunHour/env-lock/issues"
+  },
+  "homepage": "https://github.com/ThunHour/env-lock#readme",
   "engines": {
     "vscode": "^1.93.0"
   },

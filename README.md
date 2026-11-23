@@ -3,6 +3,19 @@
 Post-quantum encryption for your secret files (`.env`, keystores, `master.key`, `*.tfvars`, … for any language)
 so AI coding agents (Claude Code, Copilot agent, Cursor, Cline, Gemini CLI, Codex, Aider…) can't read them.
 
+## Quick start
+
+1. **Install** Env Lock from the Extensions view (VS Code Marketplace; Open VSX for Cursor, Windsurf, VSCodium),
+   or from a file: `code --install-extension env-lock-<version>.vsix`.
+2. Open a project with a `.env` file and run **Env Lock: Set up post-quantum keys** (`Ctrl+Shift+P`):
+   choose a passphrase (optionally a key file). Your secret files are locked at once.
+3. Run **Env Lock: Set anti-phishing phrase**, then **Env Lock: Back up keys and vault**.
+4. Start your app with **Env Lock: Run a command with secrets** (e.g. `npm run dev`): secrets go to that
+   process in memory and the files stay locked.
+
+📖 **Full documentation:** [User guide](docs/user-guide.md) · [Changelog](CHANGELOG.md) ·
+[Security policy](SECURITY.md) · [Red-team report](docs/redteam-report.md) · [Contributing](CONTRIBUTING.md)
+
 ## Why encryption, not "blocking"
 
 An AI agent runs as **your** OS user, just like VS Code. No extension can stop a same-user process from
@@ -194,7 +207,7 @@ What Env Lock **cannot** stop, and what to do instead:
   # the hash of the build you trust (run in this repo after `npm run build`, or published with a release)
   npm run hash
   # the installed copy
-  Get-FileHash "$env:USERPROFILE\.vscode\extensions\local.env-lock-*\dist\extension.js" -Algorithm SHA256
+  Get-FileHash "$env:USERPROFILE\.vscode\extensions\*.env-lock-*\dist\extension.js" -Algorithm SHA256
   ```
 
   Publishing to the Marketplace adds VS Code's own signature check at install time.
@@ -206,8 +219,9 @@ What Env Lock **cannot** stop, and what to do instead:
 
 ```powershell
 npm install
-npm test          # tsc + esbuild bundle + 40 unit tests (PQC crypto, signing, vault, policy, patterns, scan, agent rules, hook)
-npm run redteam   # 40 attacks run unattended in an isolated VS Code (~8 min) -> docs/redteam-results.md
+npm test          # tsc + esbuild bundle + 43 unit tests (PQC crypto, signing, vault, policy, patterns, scan, copies, agent rules, hook)
+npm run redteam   # 48 attacks run unattended in an isolated VS Code (~4 min) -> docs/redteam-results.md
+node scripts/redteam-vscode.js --only=X1,X8   # selected attacks only
 npm run audit     # known vulnerabilities + registry signatures of dependencies
 npm run hash      # SHA-256 of dist/extension.js, to verify an installed copy
 npm run attack    # attack simulator for the manual security tests in docs/attack-tests.md
@@ -217,7 +231,8 @@ Before trusting a build with real secrets, run `npm run redteam` (in the source 
 do not click in it). The attacks, method and findings are in `docs/redteam-report.md`.
 
 Press **F5** to launch an Extension Development Host. Package with `npx @vscode/vsce package`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and the rules for changes.
 
 ## Author
 
-Created by **Seak Kimhour**. Released under the MIT License.
+Created by **Seak Kimhour**. Released under the [MIT License](LICENSE).
