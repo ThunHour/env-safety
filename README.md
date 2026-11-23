@@ -1,7 +1,22 @@
-# Env Safety
+# Env Safety: hide your .env secrets from AI coding agents
 
-Post-quantum encryption for your secret files (`.env`, keystores, `master.key`, `*.tfvars`, … for any language)
-so AI coding agents (Claude Code, Copilot agent, Cursor, Cline, Gemini CLI, Codex, Aider…) can't read them.
+**AI coding agents can read every file in your project, including `.env`.** GitHub Copilot agent, Claude Code,
+Cursor, Cline, Gemini CLI, Codex and Aider all run as you, so a `.gitignore` or an ignore file does not stop
+them from reading your API keys, database passwords and cloud credentials.
+
+**Env Safety encrypts your secret files while agents work**, so there is nothing readable to leak. Your app
+still gets its environment variables: run it with secrets in memory, never written to disk.
+
+- 🔒 **Encrypts `.env` and secret files automatically**: when the project opens, when an AI agent starts, after a
+  timeout, and when VS Code closes. Locking needs no passphrase.
+- 🧠 **Knows every stack**: Node, Python, Django, Rails, Laravel, Spring, .NET, Go, Flutter, Android, iOS,
+  Rust, Terraform, Docker and Kubernetes secret files are detected for you.
+- ▶️ **Runs your app with secrets in memory** (`npm run dev`, `python manage.py runserver`…): files stay locked.
+- 🛡️ **Post-quantum encryption**: ML-KEM-768 (FIPS 203) + X25519, AES-256-GCM, every file signed.
+- 🕵️ **Resists hostile agents**: swapped keys, planted or rolled-back files, settings changes and copied
+  secrets are detected. 51 automated attacks are run against every release.
+- 🚫 **Writes deny rules** for Claude Code, Cursor, Cline, Gemini, Codeium and Aider.
+- 🆓 **Free and open source (MIT)**; works offline, sends nothing over the network.
 
 ## Quick start
 

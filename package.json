@@ -1,7 +1,7 @@
 {
   "name": "env-safety",
-  "displayName": "Env Safety — post-quantum secret lock for AI agents",
-  "description": "Encrypts .env and other secret files (any language) with ML-KEM-768 + X25519 while AI coding agents work, and writes deny rules for Claude Code, Cursor, Cline, Gemini and others.",
+  "displayName": "Env Safety — Hide .env Secrets from AI Agents",
+  "description": "Keep .env files, API keys and credentials hidden from AI coding agents (GitHub Copilot, Claude Code, Cursor, Cline, Gemini, Codex). Encrypts secret files with post-quantum crypto while agents work, and runs your app with secrets in memory.",
   "version": "0.8.0",
   "publisher": "SeakKimhour",
   "author": "Seak Kimhour",
@@ -25,17 +25,46 @@
     "virtualWorkspaces": false
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "keywords": [
     "env",
     "dotenv",
+    ".env",
     "secrets",
-    "ai",
+    "secret",
+    "api key",
+    "credentials",
+    "encryption",
+    "encrypt",
     "security",
+    "privacy",
+    "vault",
+    "ai",
+    "ai agent",
+    "copilot",
+    "github copilot",
+    "claude",
+    "claude code",
+    "cursor",
+    "cline",
+    "gemini",
+    "codex",
+    "aider",
+    "llm",
+    "prompt injection",
     "post-quantum",
-    "ml-kem"
+    "ml-kem",
+    "environment variables",
+    "secret scanning",
+    "password"
   ],
+  "galleryBanner": {
+    "color": "#1e1b4b",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished"
