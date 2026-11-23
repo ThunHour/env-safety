@@ -1,17 +1,19 @@
 # Env Lock red-team report
 
-**Version tested:** 0.7.4 (fixes from this round included) · **Date:** 2026-11-23 · **Tester:** Claude (automated red team)
-**Environment:** Windows 11, VS Code 1.147, Node 22 · **Raw results:** [redteam-results.md](redteam-results.md) (generated) ·
-**Earlier rounds:** [security-review-owasp.md](security-review-owasp.md)
+**Version tested:** 0.7.5 (fixes from every round included) · **Date:** 2026-11-23 · **Tester:** Claude (automated red team)
+**Environment:** Windows 11, VS Code 1.147, Node 22 · **Raw results:** [redteam-results.md](redteam-results.md) (generated)
 
 ## 1. Summary
 
 Every attack in this report was **run against a real, isolated VS Code**, not only reasoned about, with a scripted user
-answering Env Lock's dialogs. 40 attacks ran in four VS Code sessions, between which the attacker
-also acted while VS Code was closed. They are backed by 40 unit tests and
+answering Env Lock's dialogs. 48 attacks run in four VS Code sessions, between which the attacker
+also acts while VS Code is closed. They are backed by 43 unit tests and
 by fuzzing (random patterns, damaged locked files and keyrings, bit flips).
 
-**Result of the final run: 40 of 40 attacks defended, 0 failed, 0 errors** (plus 40/40 unit tests). It took four runs to get there: the first three each failed on real problems, listed below, which were fixed before the next run.
+**Result of the latest run (0.7.5): 48 of 48 attacks defended, 0 failed, 0 errors** (plus 43/43 unit tests).
+Round 5 (attacks X1–X8, [§6](#6-round-5-keeping-secrets-readable-after-a-lock-075)) found five more problems, all fixed in 0.7.5.
+
+For round 4 (0.7.4, 40 attacks) it took four runs: the first three each failed on real problems, listed below, which were fixed before the next run.
 
 Running the attacks for real found **six problems that code review had missed**. All are fixed in 0.7.4, and the
 same attacks were run again to show the fixes hold:
@@ -65,7 +67,7 @@ before Env Lock started, an OS-level compromise.
 ## 4. Attack list
 
 Result column: ✅ defended in the final run · 🔧 failed in an earlier run of this round, fixed, then defended ·
-🧪 unit test or fuzzing (outside VS Code) · ⚠ not testable automatically (see §6).
+🧪 unit test or fuzzing (outside VS Code) · ⚠ not testable automatically (see §7).
 ATT&CK = MITRE ATT&CK technique the attack belongs to.
 
 ### Getting the secrets
@@ -178,7 +180,26 @@ other checks passed). *Fix:* Env Lock also reads `.vscode/settings.json` (commen
 opened, so a rewrite during a session went unnoticed (data stayed safe: unlock refused every file, but without
 saying why). *Fix:* `vault.json` is compared with the cached salt on every scan.
 
-## 6. Not tested automatically, and residual risk
+## 6. Round 5: keeping secrets readable after a lock (0.7.5)
+
+The attacker acts **while secrets are unlocked** (which it may: they are readable then) to make them stay
+readable after the next lock, for itself later or for another agent.
+
+| ID | Attack | 0.7.4 | Fix in 0.7.5 |
+|---|---|---|---|
+| X1 | `git add .env`: git-tracked files are never locked | ❌ plaintext stayed, staged for commit | Staged-only secrets are unstaged (`git rm --cached`) and locked; you are told |
+| X2 | Hard-link `.env` ↔ `notes.txt` | ❌ not locked, only logged | Visible error naming the other name (`fsutil hardlink list`) |
+| X3 | Secret in an NTFS stream `.env:hidden` | ✅ the stream is deleted with the file | — |
+| X4 | `.ENV.Local`, `sub/.Env`, nested folders | ✅ locked | — |
+| X5 | Copy into `dist/.env`, `build/.env.production` | ❌ never scanned | Build output folders scanned last, with their own budget |
+| X6 | Secret still in an editor tab after lock | ✅ dropped | — (API-opened documents: residual, §7) |
+| X7 | Rename `.env` → `.env.example` (allow-listed) | ❌ never locked, no warning | Templates holding a real secret value are locked |
+| X8 | Paste a key into `src/config.js` | ❌ undetected | After each lock, copies are searched (HMAC fingerprints, no plaintext kept); *Protect and lock* |
+
+Also found while fixing X8: `envLock.customPatterns` could not be written per folder, so *Protect this file*
+failed for unmatched files in single-folder workspaces. Fixed (`resource` scope).
+
+## 7. Not tested automatically, and residual risk
 
 - **Does uninstalling an extension wipe its credential store in a normal VS Code?** The harness cannot tell (its
   storage is in memory). Either way R11's fix covers it: a wipe is reported and your files still unlock.
@@ -189,9 +210,11 @@ saying why). *Fix:* `vault.json` is compared with the cached salt on every scan.
 - **Residual, by design:** while secrets are unlocked an agent can read them; code your command runs
   (`package.json` scripts, `node_modules`) can be changed by an agent (Env Lock shows changes to the files in the
   run folder, not deeper); a link swapped into a parent folder in the microseconds between Env Lock's last check
-  and its write; an agent that reads the OS credential store or another process's memory.
+  and its write; an agent that reads the OS credential store or another process's memory; copies of a secret
+  in a changed form (encoded, split); a document another extension opened through the API (kept in memory for
+  a few minutes after lock).
 
-## 7. Run history
+## 8. Run history
 
 | Run | Version | Result | What happened |
 |---|---|---|---|
@@ -200,13 +223,18 @@ saying why). *Fix:* `vault.json` is compared with the cached salt on every scan.
 | 3 | 0.7.3 | 39 of 40 | R11 fixed (T30 passes); T29 traced to the salt being checked only at startup (R13) |
 | 4 | 0.7.4 | 39 of 40 | R13 fixed (T29 passes); T14 failed on a timing race **in the test** (it checked for the message before Env Lock showed it; the defence itself worked) |
 | 5 | 0.7.4 | **40 of 40** | test race fixed (it now waits for the message) |
+| 6 | 0.7.4 | 3 of 8 (X1–X7 only) | X1, X2, X5, X7 failed (findings); X6 failed because the test itself held the document open (test fixed) |
+| 7 | 0.7.5-dev | X8 1 of 2 checks | copy found, but *Protect and lock* failed: `customPatterns` scope bug (fixed) |
+| 8 | 0.7.5 | 47 of 48 | everything passes except T18: the old 0.7.4 package no longer matched the build (repackaged) |
+| 9 | 0.7.5 | **48 of 48** | all attacks defended, run again after installing the 0.7.5 package |
 
-## 8. Reproduce
+## 9. Reproduce
 
 ```
 npm install
-npm test            # 40 unit tests
-npm run redteam     # 40 attacks in an isolated VS Code (~8 min); a window opens: do not click in it
+npm test            # 43 unit tests
+npm run redteam     # 48 attacks in an isolated VS Code (~4 min); a window opens: do not click in it
+node scripts/redteam-vscode.js --only=X1,X8   # selected attacks only
 ```
 
 Results go to [docs/redteam-results.md](redteam-results.md); raw JSON and VS Code logs to `.redteam/results/`.

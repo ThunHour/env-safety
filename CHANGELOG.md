@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Env Lock. Security fixes reference the attack IDs in
-[docs/redteam-report.md](docs/redteam-report.md) and [docs/attack-list.md](docs/attack-list.md).
+[docs/redteam-report.md](docs/redteam-report.md).
 
 ## 0.7.5 — 2026-11-23
 

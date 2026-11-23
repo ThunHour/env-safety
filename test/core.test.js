@@ -473,7 +473,7 @@ test('bundle builds and loads ML-KEM in CommonJS (as VS Code will)', () => {
   assert.ok(!/require\(["']@noble/.test(bundle), 'no runtime require of ESM-only package');
 });
 
-// ------------------------------------------------------------ red-team fixes (docs/security-review-owasp.md)
+// ------------------------------------------------------------ red-team fixes (docs/redteam-report.md)
 
 test('F5 ReDoS: repeated globstars are collapsed, too-complex patterns refused, built-ins all safe', () => {
   const deep = Array(30).fill('a').join('/') + '/y';
