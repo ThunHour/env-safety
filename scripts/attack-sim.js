@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Env Lock attack simulator: does what a hostile AI agent running as you could do, so each defense
+ * Env Safety attack simulator: does what a hostile AI agent running as you could do, so each defense
  * can be checked in a real VS Code window. See docs/attack-tests.md.
  *
  * Everything happens under .attack-test/ (its own VS Code user data, keyring, vault and project),
- * never in your real ~/.env-lock. Run `npm run compile` first (it uses the compiled out/ modules).
+ * never in your real ~/.env-safety. Run `npm run compile` first (it uses the compiled out/ modules).
  *
  *   node scripts/attack-sim.js <command>
  */
@@ -37,12 +37,12 @@ const writeJson = (f, j) => {
   fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
 };
 function keyring() {
-  if (!fs.existsSync(KEYRING)) fail(`no keyring at ${KEYRING}: run "Env Lock: Set up post-quantum keys" in the test window first.`);
+  if (!fs.existsSync(KEYRING)) fail(`no keyring at ${KEYRING}: run "Env Safety: Set up post-quantum keys" in the test window first.`);
   return load('crypto').parseKeyring(fs.readFileSync(KEYRING, 'utf8'));
 }
 function vault() {
-  const id = readJson(PROJECT_SETTINGS)['envLock.vaultId'];
-  if (!id) fail('the project has no envLock.vaultId yet: lock once in the test window first.');
+  const id = readJson(PROJECT_SETTINGS)['envSafety.vaultId'];
+  if (!id) fail('the project has no envSafety.vaultId yet: lock once in the test window first.');
   const dir = path.join(VAULT_ROOT, id);
   const meta = readJson(path.join(dir, 'vault.json'), null);
   if (!meta) fail(`no vault at ${dir}`);
@@ -59,14 +59,14 @@ const commands = {
       fs.writeFileSync(path.join(PROJECT, '.env'), 'API_KEY=dev-key-111\nAPI_URL=https://api.example.com\n');
       fs.writeFileSync(path.join(PROJECT, '.env.production'), 'API_KEY=PRODUCTION-key-999\nAPI_URL=https://api.example.com\n');
       fs.writeFileSync(path.join(PROJECT, 'index.js'), "console.log('API_KEY =', process.env.API_KEY);\n");
-      writeJson(USER_SETTINGS, { 'envLock.keyringPath': KEYRING, 'envLock.vaultPath': VAULT_ROOT });
+      writeJson(USER_SETTINGS, { 'envSafety.keyringPath': KEYRING, 'envSafety.vaultPath': VAULT_ROOT });
       try {
         execFileSync('git', ['init', '-q'], { cwd: PROJECT });
       } catch {
         console.log('  (git not found: skip test 15)');
       }
       console.log(`✔ test project: ${PROJECT}\n✔ isolated user settings: ${USER_SETTINGS}`);
-      console.log('Next: in VS Code, Run and Debug → "Env Lock: attack tests (isolated)".');
+      console.log('Next: in VS Code, Run and Debug → "Env Safety: attack tests (isolated)".');
     },
   ],
   'swap-keyring': [
@@ -148,11 +148,11 @@ const commands = {
     () => {
       const j = readJson(PROJECT_SETTINGS);
       Object.assign(j, {
-        'envLock.lockOnClose': false,
-        'envLock.autoLockMinutes': 0,
-        'envLock.allowList': ['**'],
-        'envLock.confirmUnlockToDisk': false,
-        'envLock.storage': 'inPlace',
+        'envSafety.lockOnClose': false,
+        'envSafety.autoLockMinutes': 0,
+        'envSafety.allowList': ['**'],
+        'envSafety.confirmUnlockToDisk': false,
+        'envSafety.storage': 'inPlace',
       });
       writeJson(PROJECT_SETTINGS, j);
       console.log('✔ project settings weakened');
@@ -162,27 +162,27 @@ const commands = {
     'Test 8: try to switch protection off through the USER settings file.',
     () => {
       const j = readJson(USER_SETTINGS);
-      Object.assign(j, { 'envLock.lockOnClose': false, 'envLock.confirmUnlockToDisk': false, 'envLock.autoLockMinutes': 0 });
+      Object.assign(j, { 'envSafety.lockOnClose': false, 'envSafety.confirmUnlockToDisk': false, 'envSafety.autoLockMinutes': 0 });
       writeJson(USER_SETTINGS, j);
       console.log('✔ user settings weakened');
     },
   ],
   'change-vault-id': [
-    "Test 9: point the project's envLock.vaultId at a new, empty vault.",
+    "Test 9: point the project's envSafety.vaultId at a new, empty vault.",
     () => {
       const j = readJson(PROJECT_SETTINGS);
-      j['envLock.vaultId'] = load('vault').newVaultId();
+      j['envSafety.vaultId'] = load('vault').newVaultId();
       writeJson(PROJECT_SETTINGS, j);
-      console.log(`✔ vaultId changed to ${j['envLock.vaultId']}`);
+      console.log(`✔ vaultId changed to ${j['envSafety.vaultId']}`);
     },
   ],
   'clean-project-settings': [
     'After tests 7 and 9: remove the attack values from the project settings (keeps the real vaultId).',
     () => {
       const j = readJson(PROJECT_SETTINGS);
-      for (const k of Object.keys(j)) if (k !== 'envLock.vaultId') delete j[k];
+      for (const k of Object.keys(j)) if (k !== 'envSafety.vaultId') delete j[k];
       writeJson(PROJECT_SETTINGS, j);
-      console.log('✔ project settings cleaned (fix envLock.vaultId by hand if test 9 changed it)');
+      console.log('✔ project settings cleaned (fix envSafety.vaultId by hand if test 9 changed it)');
     },
   ],
   'plant-env-local': [
@@ -203,7 +203,7 @@ const commands = {
     'Test 23: add a catastrophic glob to the project settings and a deep folder to match it against.',
     () => {
       const j = readJson(PROJECT_SETTINGS);
-      j['envLock.customPatterns'] = ['**/**/**/**/**/**/**/**/**/**/**/**/x'];
+      j['envSafety.customPatterns'] = ['**/**/**/**/**/**/**/**/**/**/**/**/x'];
       writeJson(PROJECT_SETTINGS, j);
       const deep = path.join(PROJECT, ...Array(30).fill('a'));
       fs.mkdirSync(deep, { recursive: true });
@@ -215,19 +215,19 @@ const commands = {
     'Test 24: drop "auto" from the USER presets (only dotenv stays protected).',
     () => {
       const j = readJson(USER_SETTINGS);
-      j['envLock.presets'] = ['dotenv'];
+      j['envSafety.presets'] = ['dotenv'];
       writeJson(USER_SETTINGS, j);
       console.log('✔ user presets shrunk to ["dotenv"]');
     },
   ],
   'fsmonitor': [
-    "Test 28: make the project's git run a command (core.fsmonitor) whenever Env Lock calls git.",
+    "Test 28: make the project's git run a command (core.fsmonitor) whenever Env Safety calls git.",
     () => {
       const marker = path.join(ROOT, 'FSMONITOR-RAN');
       const script = path.join(ROOT, 'fsmon.js');
       fs.writeFileSync(script, `require('fs').appendFileSync(${JSON.stringify(marker)}, new Date().toISOString() + '\\n');\n`);
       execFileSync('git', ['config', 'core.fsmonitor', `node "${script.replace(/\\/g, '/')}"`], { cwd: PROJECT });
-      console.log(`✔ core.fsmonitor set. Expect NO file ${marker} after Env Lock refreshes. Undo: git config --unset core.fsmonitor`);
+      console.log(`✔ core.fsmonitor set. Expect NO file ${marker} after Env Safety refreshes. Undo: git config --unset core.fsmonitor`);
     },
   ],
   'junction': [
@@ -246,7 +246,7 @@ const commands = {
     () => {
       const ls = (d) => (fs.existsSync(d) ? fs.readdirSync(d) : []);
       console.log('project :', ls(PROJECT).filter((n) => n.startsWith('.env')).join(', ') || '(no .env files)');
-      const id = readJson(PROJECT_SETTINGS)['envLock.vaultId'];
+      const id = readJson(PROJECT_SETTINGS)['envSafety.vaultId'];
       console.log('vault   :', id ? `${id}: ${ls(path.join(VAULT_ROOT, id)).join(', ') || '(empty)'}` : '(none yet)');
       console.log('keyring :', fs.existsSync(KEYRING) ? KEYRING : '(none yet)');
     },
@@ -262,7 +262,7 @@ const commands = {
 
 const name = process.argv[2];
 if (!commands[name]) {
-  console.log('Env Lock attack simulator (isolated in .attack-test/). Commands:\n');
+  console.log('Env Safety attack simulator (isolated in .attack-test/). Commands:\n');
   for (const [n, [desc]] of Object.entries(commands)) console.log(`  ${n.padEnd(24)} ${desc}`);
   process.exit(name ? 1 : 0);
 }

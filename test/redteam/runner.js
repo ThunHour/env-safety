@@ -1,9 +1,9 @@
 /**
- * Env Lock red-team runner. Runs INSIDE an isolated VS Code (extension host), started by
+ * Env Safety red-team runner. Runs INSIDE an isolated VS Code (extension host), started by
  * scripts/redteam-vscode.js with --extensionTestsPath. It plays two roles:
  *   - the attacker: an AI agent running as you (edits files, settings, git config, installs extensions);
- *   - the user: answers Env Lock's dialogs (via test/redteam/vscode-shim.js), always the safe way
- *     unless a test needs otherwise, and records every message Env Lock shows.
+ *   - the user: answers Env Safety's dialogs (via test/redteam/vscode-shim.js), always the safe way
+ *     unless a test needs otherwise, and records every message Env Safety shows.
  * Results are written as JSON per phase; the orchestrator turns them into docs/redteam-results.md.
  */
 const vscode = require('vscode');
@@ -13,11 +13,12 @@ const cp = require('child_process');
 
 const ROOT = process.env.REDTEAM_ROOT;
 const REPO = process.env.REDTEAM_REPO;
+const EXT_ID = process.env.REDTEAM_EXT_ID; // <publisher>.<name> from package.json
 const PHASE = process.env.REDTEAM_PHASE;
 const OUT = process.env.REDTEAM_OUT;
 const PROJECT = path.join(ROOT, 'project');
 const OUTSIDE = path.join(ROOT, 'outside');
-const HOME = path.join(ROOT, 'home', '.env-lock'); // USERPROFILE of the test VS Code is .redteam/home
+const HOME = path.join(ROOT, 'home', '.env-safety'); // USERPROFILE of the test VS Code is .redteam/home
 const KEYRING = path.join(HOME, 'keyring.json');
 const VAULT_ROOT = path.join(HOME, 'vault');
 const USER_SETTINGS = path.join(ROOT, 'user-data', 'User', 'settings.json');
@@ -102,10 +103,10 @@ const writeJson = (f, j) => {
 const mark = () => calls.length;
 const saw = (since, re, kind) => calls.slice(since).filter((c) => (!kind || c.kind === kind) && re.test(c.text || ''));
 const cmd = (id, ...a) => vscode.commands.executeCommand(id, ...a);
-const cfgGet = (k) => vscode.workspace.getConfiguration('envLock').inspect(k)?.globalValue;
+const cfgGet = (k) => vscode.workspace.getConfiguration('envSafety').inspect(k)?.globalValue;
 
 function vault() {
-  const id = readJson(PROJECT_SETTINGS)['envLock.vaultId'];
+  const id = readJson(PROJECT_SETTINGS)['envSafety.vaultId'];
   const dir = path.join(VAULT_ROOT, id);
   const meta = readJson(path.join(dir, 'vault.json'));
   return { id, dir, salt: Buffer.from(meta.salt, 'base64') };
@@ -115,12 +116,12 @@ const blobs = (v) => fs.readdirSync(v.dir).filter((n) => n.endsWith('.locked'));
 
 async function lockAll() {
   policy = {};
-  await cmd('envLock.lock');
+  await cmd('envSafety.lock');
   await sleep(400);
 }
 async function unlockAll(extra = []) {
   policy = { message: respond([...extra, UNLOCK]) };
-  await cmd('envLock.unlock');
+  await cmd('envSafety.unlock');
   await sleep(400);
   policy = {};
 }
@@ -158,7 +159,7 @@ function cli(...args) {
 /** Run-with-secrets with a probe script that records what the process received. */
 async function runWithSecrets(command, messagePairs, { waitForFile, ms = 20000 } = {}) {
   policy = { ...policy, command, message: respond(messagePairs) }; // keeps a quickPick choice set by the test
-  await cmd('envLock.runWithSecrets');
+  await cmd('envSafety.runWithSecrets');
   policy = {};
   if (waitForFile) await waitFor(() => exists(waitForFile), ms);
 }
@@ -184,7 +185,7 @@ const T = (id, name, owasp, fn, opts = {}) => tests.push({ id, name, owasp, fn, 
 
 T('S0', 'Setup: keys, anti-phishing phrase, first lock', 'A07', async (c) => {
   policy = {};
-  await cmd('envLock.setupKeys');
+  await cmd('envSafety.setupKeys');
   c.expect(exists(KEYRING), 'keyring created');
   c.expect(saw(0, /your phrase: "blue teapot"|anti-phishing/, 'showInputBox').length, 'anti-phishing phrase set');
   await lockAll();
@@ -209,7 +210,7 @@ T('T02', 'Swapped keyring (agent replaces your key with its own)', 'A08', async 
   fs.writeFileSync(P('.env.local'), 'X=1\n');
   const m = mark();
   policy = { message: respond([[/keyring changed/, 'Trust this keyring']]) }; // the user is fooled and types THEIR passphrase
-  await cmd('envLock.lock');
+  await cmd('envSafety.lock');
   policy = {};
   c.expect(saw(m, /your keyring changed/).length, 'warned "your keyring changed"');
   c.expect(exists(P('.env.local')), 'nothing was encrypted to the attacker key');
@@ -274,10 +275,10 @@ T('T06', 'Locked files deleted from the vault', 'A08', async (c) => {
   for (const b of blobs(v)) fs.copyFileSync(path.join(v.dir, b), path.join(keep, b));
   for (const b of blobs(v)) fs.unlinkSync(path.join(v.dir, b));
   const m = mark();
-  fs.writeFileSync(P('.env.trigger'), 'X=1'); // any change makes Env Lock re-check
+  fs.writeFileSync(P('.env.trigger'), 'X=1'); // any change makes Env Safety re-check
   await sleep(1500);
   fs.unlinkSync(P('.env.trigger'));
-  c.expect(await waitFor(() => saw(m, /deleted by something other than Env Lock/).length, 15000), 'reported "deleted by something other than Env Lock"');
+  c.expect(await waitFor(() => saw(m, /deleted by something other than Env Safety/).length, 15000), 'reported "deleted by something other than Env Safety"');
   for (const b of fs.readdirSync(keep)) fs.copyFileSync(path.join(keep, b), path.join(v.dir, b));
   await lockAll();
 });
@@ -285,46 +286,46 @@ T('T06', 'Locked files deleted from the vault', 'A08', async (c) => {
 T('T07', 'Project settings try to switch protection off', 'A01', async (c) => {
   const m = mark();
   for (const [k, val] of Object.entries({ lockOnClose: false, autoLockMinutes: 0, allowList: ['**'], confirmUnlockToDisk: false, storage: 'inPlace' })) {
-    setProject('envLock.' + k, val);
+    setProject('envSafety.' + k, val);
   }
   c.expect(await waitFor(() => saw(m, /ignored settings in this project/).length, 10000), 'warned "ignored settings in this project"');
   const m2 = mark();
   policy = {}; // cancel the confirmation
-  await cmd('envLock.unlock');
+  await cmd('envSafety.unlock');
   c.expect(saw(m2, /to disk\?/).length, 'unlocking still asks first (confirmUnlockToDisk kept)');
   c.expect(!exists(P('.env')), 'still locked');
-  for (const k of ['lockOnClose', 'autoLockMinutes', 'allowList', 'confirmUnlockToDisk', 'storage']) setProject('envLock.' + k, undefined);
+  for (const k of ['lockOnClose', 'autoLockMinutes', 'allowList', 'confirmUnlockToDisk', 'storage']) setProject('envSafety.' + k, undefined);
   await sleep(1500);
 });
 
 T('T08', 'User settings file edited to weaken protection (VS Code running)', 'A01', async (c) => {
   const m = mark();
-  setUser('envLock.lockOnClose', false);
-  setUser('envLock.confirmUnlockToDisk', false);
-  setUser('envLock.autoLockMinutes', 0);
+  setUser('envSafety.lockOnClose', false);
+  setUser('envSafety.confirmUnlockToDisk', false);
+  setUser('envSafety.autoLockMinutes', 0);
   c.expect(await waitFor(() => saw(m, /made protection WEAKER|protection WEAKER/).length, 15000), 'dialog "changed to make protection WEAKER"');
   c.expect(
     await waitFor(() => {
       const j = readJson(USER_SETTINGS);
-      return j['envLock.lockOnClose'] === true && j['envLock.confirmUnlockToDisk'] === true && j['envLock.autoLockMinutes'] === 5;
+      return j['envSafety.lockOnClose'] === true && j['envSafety.confirmUnlockToDisk'] === true && j['envSafety.autoLockMinutes'] === 5;
     }, 15000),
     'cancelled: the file is reverted to the approved values (true, true, 5)'
   );
   const m2 = mark();
-  setUser('envLock.autoLockMinutes', 4);
+  setUser('envSafety.autoLockMinutes', 4);
   await sleep(3000);
   c.expect(!saw(m2, /WEAKER/).length, 'a stronger value (4 min) goes through without a dialog');
 });
 
-T('T09', 'Vault redirected (envLock.vaultId changed in the project)', 'A01', async (c) => {
-  const real = readJson(PROJECT_SETTINGS)['envLock.vaultId'];
+T('T09', 'Vault redirected (envSafety.vaultId changed in the project)', 'A01', async (c) => {
+  const real = readJson(PROJECT_SETTINGS)['envSafety.vaultId'];
   const m = mark();
-  setProject('envLock.vaultId', V.newVaultId());
+  setProject('envSafety.vaultId', V.newVaultId());
   await sleep(1500);
   await unlockAll();
   c.expect(saw(m, /vaultId.*changed.*Still using your vault/).length, 'warned "vaultId changed … still using your vault"');
   c.expect(/dev-key-111/.test(read(P('.env'))), 'unlocking still restores the real .env from the pinned vault');
-  setProject('envLock.vaultId', real);
+  setProject('envSafety.vaultId', real);
   await sleep(1000);
   await lockAll();
 });
@@ -335,7 +336,7 @@ T('T10', 'Anti-phishing phrase in every real passphrase prompt', 'A07', async (c
   const after = prompts.filter((x) => x.t > phraseSetAt);
   c.expect(after.length > 0, `${after.length} passphrase prompts after the phrase was set`);
   c.expect(after.every((x) => /your phrase: "blue teapot"/.test(x.options.title || '')), 'every one shows your phrase in its title');
-  c.expect(after.every((x) => /never in a terminal/.test(x.options.prompt || '')), 'every one says Env Lock never asks in a terminal');
+  c.expect(after.every((x) => /never in a terminal/.test(x.options.prompt || '')), 'every one says Env Safety never asks in a terminal');
 });
 
 T('T11', 'Run a command with secrets (in memory); AI agents refused', 'A06', async (c) => {
@@ -378,13 +379,13 @@ T('T13', 'Extension installed from the command line while secrets are in use', '
   await unlockAll();
   fs.writeFileSync(P('rt-sleep.js'), 'setInterval(() => {}, 1000);\n');
   await runWithSecrets('node rt-sleep.js', [[/NEW or CHANGED|first run/, 'Use them'], [/will get your secrets/, 'Run anyway']]);
-  await waitFor(() => vscode.window.terminals.some((t) => t.name.startsWith('env-lock:')), 10000);
-  c.expect(vscode.window.terminals.some((t) => t.name.startsWith('env-lock:')), 'a secrets process is running');
+  await waitFor(() => vscode.window.terminals.some((t) => t.name.startsWith('env-safety:')), 10000);
+  c.expect(vscode.window.terminals.some((t) => t.name.startsWith('env-safety:')), 'a secrets process is running');
   const m = mark();
   cli('--install-extension', process.env.REDTEAM_DUMMY_VSIX, '--force');
   const seen = await waitFor(() => saw(m, /new extension\(s\) installed/).length, 45000);
   c.expect(seen, 'warned "new extension(s) installed" without a reload');
-  c.expect(await waitFor(() => !vscode.window.terminals.some((t) => t.name.startsWith('env-lock:')), 10000), 'the secrets process was stopped');
+  c.expect(await waitFor(() => !vscode.window.terminals.some((t) => t.name.startsWith('env-safety:')), 10000), 'the secrets process was stopped');
   c.expect(await waitFor(() => !exists(P('.env')), 10000), 'unlocked files were locked again');
   try {
     cli('--uninstall-extension', 'redteam.dummy-extension');
@@ -421,7 +422,7 @@ T('T15', 'Unlocked secret not ignored by git', 'A02', async (c) => {
   fs.rmSync(P('.gitignore'), { force: true });
   const m = mark();
   policy = { message: respond([UNLOCK, [/not ignored by git/, 'Add to .gitignore']]) };
-  await cmd('envLock.unlock');
+  await cmd('envSafety.unlock');
   c.expect(await waitFor(() => saw(m, /not ignored by git/).length, 15000), 'warned "not ignored by git, so it could be committed"');
   c.expect(await waitFor(() => /\/\.env/.test(read(P('.gitignore'))), 10000), '"Add to .gitignore" wrote /.env');
   policy = {};
@@ -465,19 +466,19 @@ T('T20', 'Planted npm.cmd in the project folder (F2)', 'A05', async (c) => {
   for (const f of ['package.json', 'rt-real.js', 'npm.cmd', 'ran.txt', 'stolen.txt']) fs.rmSync(P(f), { force: true });
 }, { timeout: 60000 });
 
-T('T22', 'Env Lock commands run by ANOTHER extension (F4)', 'A01', async (c) => {
+T('T22', 'Env Safety commands run by ANOTHER extension (F4)', 'A01', async (c) => {
   const victim = path.join(OUTSIDE, 'thesis.docx');
   fs.mkdirSync(OUTSIDE, { recursive: true });
   fs.writeFileSync(victim, 'my thesis');
   const m = mark();
-  await cmd('envLock.lockFile', vscode.Uri.file(victim));
+  await cmd('envSafety.lockFile', vscode.Uri.file(victim));
   c.expect(read(victim) === 'my thesis' && !exists(victim + '.locked'), 'lockFile on a file outside the workspace: refused, file intact');
   c.expect(saw(m, /not a protected secret file/).length, 'warned "not a protected secret file"');
   fs.writeFileSync(P('notes.txt'), 'notes');
-  await cmd('envLock.protectFile', vscode.Uri.file(P('notes.txt')));
+  await cmd('envSafety.protectFile', vscode.Uri.file(P('notes.txt')));
   c.expect(saw(m, /protect notes\.txt\?/).length && read(P('notes.txt')) === 'notes', 'protectFile asks first; cancelled: file intact');
   await unlockAll();
-  await cmd('envLock.unprotectFile', vscode.Uri.file(P('.env')));
+  await cmd('envSafety.unprotectFile', vscode.Uri.file(P('.env')));
   c.expect(saw(m, /stop protecting \.env\?/).length, 'unprotectFile asks first');
   await lockAll();
   c.expect(!exists(P('.env')), 'cancelled: .env still protected (locked again)');
@@ -489,23 +490,23 @@ T('T23', 'Catastrophic glob in the project settings (ReDoS, F5/R1)', 'A10', asyn
   fs.mkdirSync(deep, { recursive: true });
   fs.writeFileSync(path.join(deep, 'y'), '');
   const m = mark();
-  setProject('envLock.customPatterns', ['**/**/**/**/**/**/**/**/**/**/**/**/x', '*a*a*/*a*a*/*a*a*/*a*a*/*a*a*/b', '*a*a*a*a*b']);
+  setProject('envSafety.customPatterns', ['**/**/**/**/**/**/**/**/**/**/**/**/x', '*a*a*/*a*a*/*a*a*/*a*a*/*a*a*/b', '*a*a*a*a*b']);
   await sleep(2000);
   const t = Date.now();
-  await cmd('envLock.lock');
+  await cmd('envSafety.lock');
   const ms = Date.now() - t;
   c.expect(ms < 5000, `Lock all answered in ${ms} ms`);
   c.expect(await waitFor(() => saw(m, /too complex to match safely/).length, 5000), 'the unsafe pattern was reported and ignored');
-  setProject('envLock.customPatterns', undefined);
+  setProject('envSafety.customPatterns', undefined);
   fs.rmSync(P('a'), { recursive: true, force: true });
   await sleep(1000);
 });
 
 T('T24', 'User presets shrunk to ["dotenv"] (F6)', 'A01', async (c) => {
   const m = mark();
-  setUser('envLock.presets', ['dotenv']);
-  c.expect(await waitFor(() => saw(m, /WEAKER[\s\S]*presets/).length, 15000), 'dialog "made protection WEAKER: envLock.presets"');
-  c.expect(await waitFor(() => JSON.stringify(readJson(USER_SETTINGS)['envLock.presets']) === '["auto"]', 15000), 'cancelled: presets reverted to ["auto"]');
+  setUser('envSafety.presets', ['dotenv']);
+  c.expect(await waitFor(() => saw(m, /WEAKER[\s\S]*presets/).length, 15000), 'dialog "made protection WEAKER: envSafety.presets"');
+  c.expect(await waitFor(() => JSON.stringify(readJson(USER_SETTINGS)['envSafety.presets']) === '["auto"]', 15000), 'cancelled: presets reverted to ["auto"]');
 });
 
 T('T25', 'Hide a secret from the scan (.ignore, .rgignore, search/files.exclude)', 'A02', async (c) => {
@@ -524,7 +525,7 @@ T('T25', 'Hide a secret from the scan (.ignore, .rgignore, search/files.exclude)
 });
 
 T('T27', 'Folder replaced by a junction to outside the project (F8)', 'A01', async (c) => {
-  setProject('envLock.customPatterns', ['config/secrets.yml']);
+  setProject('envSafety.customPatterns', ['config/secrets.yml']);
   await sleep(1500);
   fs.mkdirSync(P('config'), { recursive: true });
   fs.writeFileSync(P('config', 'secrets.yml'), 'db_password: hunter2\n');
@@ -544,7 +545,7 @@ T('T27', 'Folder replaced by a junction to outside the project (F8)', 'A01', asy
   c.expect(/hunter2/.test(read(P('config', 'secrets.yml'))), 'with a real folder again it unlocks normally');
   await lockAll();
   fs.rmSync(P('config'), { recursive: true, force: true });
-  setProject('envLock.customPatterns', undefined);
+  setProject('envSafety.customPatterns', undefined);
   await baseline();
 });
 
@@ -560,7 +561,7 @@ T('T28', "Project's git configured to run a command (core.fsmonitor, F14)", 'A05
   fs.unlinkSync(P('.env.trigger'));
   await lockAll();
   await sleep(1500);
-  c.expect(!exists(marker), "Env Lock's git calls did not run the configured command");
+  c.expect(!exists(marker), "Env Safety's git calls did not run the configured command");
   cp.execFileSync('git', ['status', '--short'], { cwd: PROJECT }); // positive control: plain git runs it
   c.expect(exists(marker), 'control: a plain `git status` DOES run it (the attack is real)');
   cp.execFileSync('git', ['config', '--unset', 'core.fsmonitor'], { cwd: PROJECT });
@@ -600,7 +601,7 @@ T('R4', 'Hard link to a file outside the project, named like a secret', 'A01', a
   fs.rmSync(P('.env.hl'), { force: true });
   fs.linkSync(target, P('.env.hl'));
   await lockAll();
-  c.expect(exists(P('.env.hl')), 'not locked (Env Lock never reads a hard-linked file into the vault)');
+  c.expect(exists(P('.env.hl')), 'not locked (Env Safety never reads a hard-linked file into the vault)');
   fs.rmSync(P('.env.hl'), { force: true });
   try {
     fs.symlinkSync(path.join(OUTSIDE, 'nothing'), P('.env.sym'), 'file');
@@ -683,7 +684,7 @@ T('X5', 'Secret copied into a build folder (dist/.env, build/.env.production)', 
 T('X6', 'Secret still readable from an open document after lock (other extensions read textDocuments)', 'A04', async (c) => {
   await unlockAll();
   // Opened like a user does (an editor tab), not through openTextDocument: VS Code keeps documents
-  // that an EXTENSION opened alive for minutes whatever Env Lock does (and that extension read it already).
+  // that an EXTENSION opened alive for minutes whatever Env Safety does (and that extension read it already).
   await cmd('vscode.open', vscode.Uri.file(P('.env')));
   await sleep(1000);
   await lockAll();
@@ -710,14 +711,14 @@ T('X8', 'Agent pastes a live key into src/config.js while unlocked (copy outside
   const KEY = 'sk-LIVE-8f3a9c2e71b4';
   await unlockAll();
   fs.writeFileSync(P('.env'), ENV + `STRIPE_KEY=${KEY}\n`);
-  await lockAll(); // Env Lock fingerprints the values it locks
+  await lockAll(); // Env Safety fingerprints the values it locks
   await unlockAll();
   fs.mkdirSync(P('src'), { recursive: true });
   fs.writeFileSync(P('src', 'config.js'), `module.exports = { stripe: "${KEY}" };\n`);
   fs.writeFileSync(P('README.md'), 'The API lives at https://api.example.com (not a secret).\n');
   const m = mark();
   policy = { message: respond([[/copies of locked secret values/, 'Protect and lock']]) };
-  await cmd('envLock.lock');
+  await cmd('envSafety.lock');
   c.expect(await waitFor(() => shown(m, /copies of locked secret values/).length, 15000), 'copy reported after lock');
   const msg = shown(m, /copies of locked secret values/)[0]?.text || '';
   c.expect(/config\.js/.test(msg), `names src/config.js: ${msg.slice(0, 140)}`);
@@ -729,12 +730,12 @@ T('X8', 'Agent pastes a live key into src/config.js while unlocked (copy outside
   fs.writeFileSync(P('.env'), ENV);
   fs.rmSync(P('src'), { recursive: true, force: true });
   fs.rmSync(P('README.md'), { force: true });
-  setProject('envLock.customPatterns', undefined);
+  setProject('envSafety.customPatterns', undefined);
   await baseline();
 }, { timeout: 90000 });
 
 T('T16', 'Auto-lock after the timer (1 minute)', 'A04', async (c) => {
-  setUser('envLock.autoLockMinutes', 1);
+  setUser('envSafety.autoLockMinutes', 1);
   await sleep(2500);
   await unlockAll();
   c.expect(exists(P('.env')), 'unlocked');
@@ -759,12 +760,12 @@ T2('T26b', 'Lock on close: files locked after the restart', 'A04', async (c) => 
 T2('T08b', 'User settings weakened while VS Code was CLOSED', 'A01', async (c) => {
   // Startup dialogs may come before the scripted user is in place (answered "cancel" and kept in
   // the early list) or after (answered "cancel" by default): look in both.
-  const early = (globalThis.__envLockRedteamEarly || []).map((x) => String(x.args?.[0]));
+  const early = (globalThis.__envSafetyRedteamEarly || []).map((x) => String(x.args?.[0]));
   const weak = [...early, ...calls.map((x) => x.text || '')].find((t) => /WEAKER/.test(t));
   c.expect(!!weak, 'dialog "made protection WEAKER" at startup');
   c.expect(/lockOnClose/.test(weak || '') && /confirmUnlockToDisk/.test(weak || ''), 'it names both settings');
   c.expect(
-    await waitFor(() => readJson(USER_SETTINGS)['envLock.lockOnClose'] === true && readJson(USER_SETTINGS)['envLock.confirmUnlockToDisk'] === true, 15000),
+    await waitFor(() => readJson(USER_SETTINGS)['envSafety.lockOnClose'] === true && readJson(USER_SETTINGS)['envSafety.confirmUnlockToDisk'] === true, 15000),
     'cancelled (the default before anyone answers): values reverted'
   );
 });
@@ -785,11 +786,11 @@ phase2.push({
   name: 'Vault salt rewritten in vault.json (F9)',
   owasp: 'A08',
   fn: async (c) => {
-    fs.writeFileSync(P('.env.trigger'), 'X=1'); // make Env Lock re-scan (it also does every 60 s)
+    fs.writeFileSync(P('.env.trigger'), 'X=1'); // make Env Safety re-scan (it also does every 60 s)
     await sleep(1500);
     fs.unlinkSync(P('.env.trigger'));
-    const texts = () => [...(globalThis.__envLockRedteamEarly || []).map((x) => String(x.args?.[0])), ...calls.map((x) => x.text || '')];
-    c.expect(await waitFor(() => texts().some((t) => /vault\.json of vault .* was changed/.test(t)), 15000), 'reported "vault.json … was changed by something other than Env Lock"');
+    const texts = () => [...(globalThis.__envSafetyRedteamEarly || []).map((x) => String(x.args?.[0])), ...calls.map((x) => x.text || '')];
+    c.expect(await waitFor(() => texts().some((t) => /vault\.json of vault .* was changed/.test(t)), 15000), 'reported "vault.json … was changed by something other than Env Safety"');
     c.expect(!fs.existsSync(P('.env')), 'nothing was unlocked from the tampered vault at startup');
     const m = mark();
     await unlockAll();
@@ -813,20 +814,20 @@ phase2.push({
   },
 });
 const T3 = (id, name, owasp, fn, opts = {}) => phase3.push({ id, name, owasp, fn, ...opts });
-T3('T21', 'Env Lock ITSELF replaced by a same-id extension (F3)', 'A08', async (c) => {
+T3('T21', 'Env Safety ITSELF replaced by a same-id extension (F3)', 'A08', async (c) => {
   const m = mark();
   cli('--install-extension', process.env.REDTEAM_FAKE_VSIX, '--force');
-  const seen = await waitFor(() => saw(m, /Env Lock ITSELF was/).length, 45000);
-  c.expect(seen, 'the running Env Lock warned "Env Lock ITSELF was updated, replaced or removed"');
-  const e = vscode.extensions.getExtension('local.env-lock');
-  c.expect(true, `observed: getExtension("local.env-lock") now reports version ${e?.packageJSON?.version}`);
+  const seen = await waitFor(() => saw(m, /Env Safety ITSELF was/).length, 45000);
+  c.expect(seen, 'the running Env Safety warned "Env Safety ITSELF was updated, replaced or removed"');
+  const e = vscode.extensions.getExtension(EXT_ID);
+  c.expect(true, `observed: getExtension("${EXT_ID}") now reports version ${e?.packageJSON?.version}`);
 }, { timeout: 90000 });
 
 
 const T4 = (id, name, owasp, fn, opts = {}) => phase4.push({ id, name, owasp, fn, ...opts });
-T4('T30', 'Env Lock credential store wiped (deleted VS Code state, reset, or reinstall)', 'A08', async (c) => {
-  // The orchestrator ran `code --uninstall-extension local.env-lock` + `--install-extension` between
-  // phases 1 and 2 (needed to remove test 21's fake). Does Env Lock still know its keyring, signing
+T4('T30', 'Env Safety credential store wiped (deleted VS Code state, reset, or reinstall)', 'A08', async (c) => {
+  // The orchestrator ran `code --uninstall-extension <Env Safety's id>` + `--install-extension` between
+  // phases 1 and 2 (needed to remove test 21's fake). Does Env Safety still know its keyring, signing
   // key, pins and version history?
   const m = mark();
   await unlockAll();
@@ -834,11 +835,46 @@ T4('T30', 'Env Lock credential store wiped (deleted VS Code state, reset, or rei
   const dialogs = calls.slice(m).map((x) => x.text || '').filter((t) => t && !/passphrase/i.test(t));
   c.expect(/dev-key-111/.test(read(P('.env'))), 'unlock restores the real .env');
   c.expect(!/REFUSED/.test(summary), `no file refused (signing key kept): ${summary.slice(0, 160)}`);
-  const early = (globalThis.__envLockRedteamEarly || []).map((x) => String(x.args?.[0]));
+  const early = (globalThis.__envSafetyRedteamEarly || []).map((x) => String(x.args?.[0]));
   const startup = [...early, ...calls.map((x) => x.text || '')];
   c.expect(startup.some((t) => /protected records are gone although you have keys/.test(t)), 'the wipe is reported at startup ("protected records are gone although you have keys")');
   c.expect(true, `observed dialogs: ${dialogs.map((t) => t.replace(/\s+/g, ' ').slice(0, 90)).join(' || ') || 'none'}`);
   await lockAll();
+});
+
+// ---------------------------------------------------------------- phase M (Env Lock -> Env Safety)
+
+const phaseM = [];
+const TM = (id, name, owasp, fn, opts = {}) => phaseM.push({ id, name, owasp, fn, ...opts });
+const startup = () => [...(globalThis.__envSafetyRedteamEarly || []).map((x) => String(x.args?.[0])), ...calls.map((x) => x.text || '')];
+const LEGACY_HOME = path.join(ROOT, 'home', '.env-lock');
+
+TM('M1', 'Env Lock user installs Env Safety: keys and vaults taken over', 'A08', async (c) => {
+  c.expect(exists(KEYRING), '~/.env-safety/keyring.json created from ~/.env-lock');
+  c.expect(exists(path.join(LEGACY_HOME, 'keyring.json')), '~/.env-lock kept as a backup');
+  const s = startup();
+  c.expect(s.some((t) => /took over your keys and vaults/.test(t)), 'told: "took over your keys and vaults from ~/.env-lock"');
+  c.expect(!s.some((t) => /uninstalled and reinstalled/.test(t)), 'no false "reinstalled" alarm');
+});
+
+TM('M2', 'A weakened Env Lock setting is not adopted silently', 'A08', async (c) => {
+  const s = startup();
+  c.expect(s.some((t) => /WEAKER/.test(t) && /autoLockMinutes/.test(t)), 'asked about autoLockMinutes: 0 (copied from envLock.*)');
+  c.expect(cfgGet('autoLockMinutes') !== 0, `reverted when not confirmed (now: ${JSON.stringify(cfgGet('autoLockMinutes'))})`);
+  c.expect((cfgGet('customPatterns') || []).includes('config/legacy.yml'), 'harmless setting copied (customPatterns)');
+});
+
+TM('M3', 'A file locked by Env Lock unlocks in Env Safety, and locks again', 'A08', async (c) => {
+  const id = read(path.join(ROOT, 'legacy-vault-id.txt'));
+  const m = mark();
+  await unlockAll();
+  const summary = saw(m, /unlocked \d+ file/)[0]?.text || '';
+  c.expect(/legacy-key-777/.test(read(P('.env'))), '.env restored from the Env Lock vault');
+  c.expect(!/REFUSED/.test(summary), `signature accepted: ${summary.slice(0, 120)}`);
+  c.expect(readJson(PROJECT_SETTINGS)['envSafety.vaultId'] === id, 'project now has envSafety.vaultId = the Env Lock vault id');
+  await lockAll();
+  c.expect(!exists(P('.env')), 'locked again');
+  c.expect(fs.readdirSync(path.join(VAULT_ROOT, id)).some((n) => n.endsWith('.locked')), 'into the vault under ~/.env-safety');
 });
 
 // ================================================================ run
@@ -862,23 +898,23 @@ async function runAll(list) {
 }
 
 exports.run = async function run() {
-  globalThis.__envLockRedteam = { answer };
-  const ext = vscode.extensions.getExtension('local.env-lock');
+  globalThis.__envSafetyRedteam = { answer };
+  const ext = vscode.extensions.getExtension(EXT_ID);
   let results;
   try {
-    if (!ext) throw new Error('Env Lock (local.env-lock) is not installed in the test profile');
+    if (!ext) throw new Error(`Env Safety (${EXT_ID}) is not installed in the test profile`);
     await ext.activate();
     await sleep(3000); // startup locking, settings review
     const only = (process.env.REDTEAM_ONLY || '').split(',').filter(Boolean);
     const pick = (list) => (only.length ? list.filter((t) => t.id === 'S0' || only.includes(t.id)) : list);
-    results = await runAll(pick({ 1: tests, 2: phase2, 3: phase3, 4: phase4 }[PHASE]));
+    results = await runAll(pick({ 1: tests, 2: phase2, 3: phase3, 4: phase4, M: phaseM }[PHASE]));
   } catch (e) {
     results = [{ id: 'HARNESS', name: 'harness', status: 'error', error: String(e.stack || e), checks: [] }];
   }
-  const early = (globalThis.__envLockRedteamEarly || []).map((x) => ({ kind: x.kind, text: String(x.args?.[0]).slice(0, 300) }));
+  const early = (globalThis.__envSafetyRedteamEarly || []).map((x) => ({ kind: x.kind, text: String(x.args?.[0]).slice(0, 300) }));
   const log = calls.map((x) => ({ kind: x.kind, text: (x.text || '').slice(0, 300), buttons: x.buttons, answer: x.answer }));
   fs.writeFileSync(OUT, JSON.stringify({ phase: PHASE, version: ext?.packageJSON?.version, results, early, log }, null, 2));
-  // Quit like a user would, so Env Lock's deactivate (lock on close) runs normally.
+  // Quit like a user would, so Env Safety's deactivate (lock on close) runs normally.
   await vscode.commands.executeCommand('workbench.action.quit');
   await sleep(60000);
 };

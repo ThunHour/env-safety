@@ -1,8 +1,8 @@
-# Env Lock attack tests
+# Env Safety attack tests
 
 Unit tests (`npm test`) check the crypto and the rules outside VS Code. These tests check that the
 **defenses actually work inside a running VS Code**, by doing what a hostile AI agent running as you
-could do. Run them before trusting Env Lock with real secrets, and again after changing its security code.
+could do. Run them before trusting Env Safety with real secrets, and again after changing its security code.
 
 A test **fails** if the "Expect" doesn't happen. A failure is a finding: write down what happened
 instead and keep going.
@@ -10,19 +10,19 @@ instead and keep going.
 ## Setup (once, about 5 minutes)
 
 Everything runs in an isolated copy of VS Code, with its own settings, credential storage, extensions,
-keyring and vault under `.attack-test/`. Your real VS Code and `~/.env-lock` are never touched.
+keyring and vault under `.attack-test/`. Your real VS Code and `~/.env-safety` are never touched.
 
 1. In this repo: `npm install`, then `npm run attack setup`.
    This creates a test project `.attack-test/project` with a fake `.env` (`API_KEY=dev-key-111`) and
    `.env.production` (`API_KEY=PRODUCTION-key-999`), as a git repo without `.gitignore`.
-2. In VS Code: **Run and Debug → "Env Lock: attack tests (isolated)" → F5**. A second window opens on
+2. In VS Code: **Run and Debug → "Env Safety: attack tests (isolated)" → F5**. A second window opens on
    the test project. That window is called **the test window** below.
-3. In the test window, Command Palette → **Env Lock: Set up post-quantum keys**: "Passphrase only",
+3. In the test window, Command Palette → **Env Safety: Set up post-quantum keys**: "Passphrase only",
    passphrase `test passphrase words`. When asked, set the anti-phishing phrase `blue teapot`.
-4. A dialog may say `envLock.keyringPath` and `envLock.vaultPath` were changed to make protection
+4. A dialog may say `envSafety.keyringPath` and `envSafety.vaultPath` were changed to make protection
    weaker. That's the test setup itself (it points the keyring into `.attack-test/`), so choose
    **Yes, I changed them**. (This dialog is itself the check in test 8.)
-5. Command Palette → **Env Lock: Lock all secret files**. Both `.env` files should vanish from the
+5. Command Palette → **Env Safety: Lock all secret files**. Both `.env` files should vanish from the
    project. `npm run attack status` should show 2 files in the vault.
 
 Run the attack commands in a terminal **of this repo** (not the test window): `npm run attack <command>`.
@@ -39,12 +39,12 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
 - Result: ☐ pass ☐ fail
 
 ### 2. Swapped keyring (agent replaces your key with its own)
-- **Do:** `npm run attack swap-keyring`. In the test window: Command Palette → **Env Lock: Show protected
+- **Do:** `npm run attack swap-keyring`. In the test window: Command Palette → **Env Safety: Show protected
   files** (to be sure nothing is unlocked), then create a file `.env.local` with `X=1` and run **Lock all
   secret files**.
 - **Expect:** a dialog *"your keyring changed … nothing was locked"*. `.env.local` stays unlocked.
   Choosing **Trust this keyring** and typing `test passphrase words` fails (wrong passphrase).
-  The security log (**Env Lock: Show security log**) has *"Keyring changed"*.
+  The security log (**Env Safety: Show security log**) has *"Keyring changed"*.
 - **Undo:** `npm run attack restore-keyring`, then lock again (it should work without a dialog).
 - Result: ☐ pass ☐ fail
 
@@ -82,7 +82,7 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
 ### 6. Deleted locked files
 - **Do:** with everything locked: `npm run attack delete-vault`. In the test window: Command Palette →
   **Developer: Reload Window**.
-- **Expect:** an error *"locked secret file(s) were deleted by something other than Env Lock: .env,
+- **Expect:** an error *"locked secret file(s) were deleted by something other than Env Safety: .env,
   .env.production"*, with **Show vault folder**. The security log has *"Locked file(s) disappeared"*.
   (Files locked more than once also have a `.prev` copy in the vault.)
 - **Undo:** `npm run attack reset` and repeat setup.
@@ -108,13 +108,13 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
   (`true`, `true`, `5`). The security log has *"Reverted"*.
 - **Do (VS Code closed):** stop the test window, run `npm run attack weaken-user`, start it again.
 - **Expect:** the same dialog right at startup, and the same revert.
-- **Strengthening goes through:** set `"envLock.autoLockMinutes": 1` in that settings file by hand.
+- **Strengthening goes through:** set `"envSafety.autoLockMinutes": 1` in that settings file by hand.
   **Expect:** no dialog (a shorter auto-lock is stronger).
 - Result: ☐ pass ☐ fail
 
-### 9. Vault redirected (`envLock.vaultId` changed in the project)
+### 9. Vault redirected (`envSafety.vaultId` changed in the project)
 - **Do:** with everything locked: `npm run attack change-vault-id`.
-- **Expect:** a warning *"envLock.vaultId … changed … Still using your vault"*. The status bar still shows
+- **Expect:** a warning *"envSafety.vaultId … changed … Still using your vault"*. The status bar still shows
   the same number of locked files, and unlocking restores the real `.env`.
 - **Undo:** put the original id back in `.attack-test/project/.vscode/settings.json` (the security log
   shows the pinned id), or `npm run attack reset`.
@@ -124,14 +124,14 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
 
 ### 10. Anti-phishing phrase
 - **Do:** **Unlock all secret files** → **Unlock to disk**.
-- **Expect:** the passphrase box title shows *your phrase: "blue teapot"* and says Env Lock never asks in
+- **Expect:** the passphrase box title shows *your phrase: "blue teapot"* and says Env Safety never asks in
   a terminal. (Any prompt without it, or in a terminal, is fake.)
 - Result: ☐ pass ☐ fail
 
 ### 11. Run a command with secrets
-- **Do:** lock all. Command Palette → **Env Lock: Run a command with secrets (in memory)** → command
+- **Do:** lock all. Command Palette → **Env Safety: Run a command with secrets (in memory)** → command
   `node index.js` → passphrase.
-- **Expect:** a terminal `env-lock: node index.js` prints `API_KEY = dev-key-111`. No `.env` appears in
+- **Expect:** a terminal `env-safety: node index.js` prints `API_KEY = dev-key-111`. No `.env` appears in
   the project. Pressing a key closes the terminal.
 - **Do:** run it again with the command `claude`, and once with `node index.js & claude`.
 - **Expect:** both refused: *"is an AI agent; it will not be given your secrets"*. No passphrase prompt.
@@ -148,7 +148,7 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
   of this repo:
   `code --extensions-dir .attack-test/extensions --install-extension esbenp.prettier-vscode`
 - **Expect:** in the test window, a warning *"new extension(s) installed: Prettier …"*; the
-  `env-lock:` terminal is closed; unlocked files (if any) are locked.
+  `env-safety:` terminal is closed; unlocked files (if any) are locked.
 - **If nothing happens** until you reload the window, that is a **finding**: VS Code may not report
   installs made from outside while it runs. Write it down.
 - **Undo:** `code --extensions-dir .attack-test/extensions --uninstall-extension esbenp.prettier-vscode`
@@ -181,7 +181,7 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
 
 ### 18. Installed bundle matches the build
 - **Do:** after installing the `.vsix` in your real VS Code: `npm run hash` here, and
-  `Get-FileHash "$env:USERPROFILE\.vscode\extensions\local.env-lock-*\dist\extension.js" -Algorithm SHA256`
+  `Get-FileHash "$env:USERPROFILE\.vscode\extensions\local.env-safety-*\dist\extension.js" -Algorithm SHA256`
 - **Expect:** the same hash.
 - Result: ☐ pass ☐ fail
 
@@ -191,10 +191,10 @@ Run the attack commands in a terminal **of this repo** (not the test window): `n
 
 These can't be checked from a test like this; they are limits, listed in the README's security model:
 an agent reading the OS credential store or another process's memory, a malicious extension already
-installed before Env Lock started, and an agent deleting Env Lock's records together with its pinned key.
+installed before Env Safety started, and an agent deleting Env Safety's records together with its pinned key.
 
 ## Results
 
-| Date | Env Lock version | Tester | Passed | Failed / findings |
+| Date | Env Safety version | Tester | Passed | Failed / findings |
 |---|---|---|---|---|
 | | | | | |

@@ -135,7 +135,7 @@ async function seal(plain: Buffer, secret: Secret, aad: Buffer): Promise<Sealed>
 async function unseal(s: Sealed, secret: Secret, aad: Buffer): Promise<Buffer> {
   const { N, r, p } = s.kdf;
   // Too weak = easy offline attack; too strong = a planted keyring can make "Trust this keyring"
-  // allocate gigabytes and hang VS Code. Env Lock writes N=2^17, r=8, p=1 (128 MiB).
+  // allocate gigabytes and hang VS Code. Env Safety writes N=2^17, r=8, p=1 (128 MiB).
   if (s.kdf.name !== 'scrypt' || !(N >= 2 ** 14 && N <= 2 ** 18 && r >= 1 && r <= 8 && p >= 1 && p <= 4)) {
     throw new Error('Refusing unsafe KDF parameters in keyring.');
   }
@@ -292,9 +292,9 @@ export function decryptFile(text: string, priv: PrivateKeys): Buffer {
   try {
     p = JSON.parse(text);
   } catch {
-    throw new Error('Not an env-lock file.');
+    throw new Error('Not an env-safety file.');
   }
-  if (p.format !== 'env-lock' || p.v !== 2 || p.alg !== ALG) throw new Error('Unsupported env-lock file format.');
+  if (p.format !== 'env-lock' || p.v !== 2 || p.alg !== ALG) throw new Error('Unsupported env-safety file format.');
   if (p.keyId !== priv.keyId) throw new WrongKeyError(p.keyId);
   const h = header(p);
   const ctX = unb64(h.kem.x25519);
@@ -315,7 +315,7 @@ export function decryptFile(text: string, priv: PrivateKeys): Buffer {
 // ================================================================= authenticity (signing)
 //
 // Locking only needs the PUBLIC key, which is not secret: anyone (an AI agent too) can create a
-// file that decrypts fine. To prove a locked file was made by YOUR Env Lock, it carries an
+// file that decrypts fine. To prove a locked file was made by YOUR Env Safety, it carries an
 // HMAC-SHA256 made with a random signing key that never touches disk in readable form
 // (it is kept in the OS credential store via VS Code SecretStorage).
 
@@ -343,7 +343,7 @@ export function newMacKey(): Buffer {
 /**
  * The signing key, derived from YOUR private key (so only someone with your passphrase can make it).
  * Locking needs no passphrase, so a copy is kept in the OS credential store; but that store is
- * wiped when Env Lock is uninstalled (red-team test T30: an agent can do it with two `code`
+ * wiped when Env Safety is uninstalled (red-team test T30: an agent can do it with two `code`
  * commands), and a random key would then be lost for good: every one of your files would look
  * forged. A derived key comes back the next time you unlock.
  */
@@ -387,7 +387,7 @@ function verifyOne(text: string, macKey: Buffer | undefined, bind: string): Sign
     return { state: 'invalid', signedAt: 0 };
   }
   const { mac, ...body } = j;
-  // No mac, or an older unbound mac (Env Lock 0.3.0): needs the user's consent, like any unsigned file.
+  // No mac, or an older unbound mac (Env Safety 0.3.0): needs the user's consent, like any unsigned file.
   if (typeof mac !== 'string' || body.macv !== MAC_V) return { state: 'unsigned', signedAt: 0 };
   if (!macKey) return { state: 'invalid', signedAt: 0 };
   const want = Buffer.from(macOf(macKey, body, bind), 'base64');

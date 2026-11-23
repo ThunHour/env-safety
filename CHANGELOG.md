@@ -3,6 +3,19 @@
 All notable changes to Env Lock. Security fixes reference the attack IDs in
 [docs/redteam-report.md](docs/redteam-report.md).
 
+## 0.8.0 — 2026-11-23
+
+### Renamed: Env Lock is now **Env Safety**
+- New extension id `SeakKimhour.env-safety`, commands and settings `envSafety.*`, folder `~/.env-safety`.
+- **Automatic move:** on first start, `~/.env-lock` (keyring and vaults) is copied to `~/.env-safety` (the old
+  folder is kept as a backup), your `envLock.*` user settings are copied to `envSafety.*`, and each project's
+  `envLock.vaultId` keeps pointing at its vault. Locked files and keyrings did not change format.
+- Env Safety's protected records start over (they belonged to the old extension id): set your anti-phishing
+  phrase again and unlock once with your passphrase. Copied settings that weaken protection are shown to you
+  for confirmation, as always.
+- Agent rule blocks written by Env Lock in `.cursorignore` etc. are replaced, not duplicated.
+- Uninstall Env Lock after installing Env Safety.
+
 ## 0.7.5 — 2026-11-23
 
 Red-team round 5: attacks an agent can make **while secrets are unlocked** to keep them readable afterwards.

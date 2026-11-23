@@ -233,8 +233,8 @@ test('R9 the secret scan does not honour .ignore files, skips only excluded fold
 
 test('T07 settings files with comments and trailing commas are read (to report ignored project settings)', () => {
   const Pol2 = require('../out/policy');
-  const j = Pol2.parseJsonc('{\n // comment\n "envLock.lockOnClose": false, /* block */\n "url": "http://x//y",\n "a": [1,2,],\n}\n');
-  assert.deepStrictEqual(j, { 'envLock.lockOnClose': false, url: 'http://x//y', a: [1, 2] });
+  const j = Pol2.parseJsonc('{\n // comment\n "envSafety.lockOnClose": false, /* block */\n "url": "http://x//y",\n "a": [1,2,],\n}\n');
+  assert.deepStrictEqual(j, { 'envSafety.lockOnClose': false, url: 'http://x//y', a: [1, 2] });
   assert.strictEqual(Pol2.parseJsonc('{ broken'), undefined);
 });
 
@@ -384,7 +384,7 @@ test('signed locked files verify, still decrypt, and detect forgery', async () =
   assert.strictEqual(st(C.signLocked(signed, macKey, B)), 'valid');
   assert.strictEqual(C.verifyLocked(signed, undefined, B).state, 'invalid');
   assert.strictEqual(st('not json'), 'invalid');
-  // Signatures from Env Lock 0.3.0 (no binding) count as unsigned: they need consent once.
+  // Signatures from Env Safety 0.3.0 (no binding) count as unsigned: they need consent once.
   const old = JSON.parse(signed);
   delete old.macv;
   assert.strictEqual(st(JSON.stringify(old)), 'unsigned');
@@ -693,4 +693,42 @@ test('scan: build output folders are scanned last, with their own budget', async
   assert.ok(!r.files.includes('node_modules/.env'), 'excluded folders stay skipped');
   const tight = await scanFiles(root, ['**/node_modules/**'], { maxEntries: 10, laterEntries: 5 });
   assert.ok(tight.files.includes('src/.env') && tight.truncated, 'a huge build folder truncates only its own pass');
+});
+
+// ------------------------------------------------------------ rename: Env Lock -> Env Safety (0.8.0)
+
+const M = require('../out/migrate');
+
+test('migrate: ~/.env-lock is copied once to ~/.env-safety and kept as a backup', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'envsafety-home-'));
+  assert.strictEqual(await M.migrateHome(home), 'none', 'nothing to move');
+  fs.mkdirSync(path.join(home, '.env-lock', 'vault', 'abc'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.env-lock', 'keyring.json'), '{"k":1}');
+  fs.writeFileSync(path.join(home, '.env-lock', 'vault', 'abc', 'x.locked'), 'blob');
+  assert.strictEqual(await M.migrateHome(home), 'migrated');
+  assert.strictEqual(fs.readFileSync(path.join(home, '.env-safety', 'keyring.json'), 'utf8'), '{"k":1}');
+  assert.strictEqual(fs.readFileSync(path.join(home, '.env-safety', 'vault', 'abc', 'x.locked'), 'utf8'), 'blob');
+  assert.ok(fs.existsSync(path.join(home, '.env-lock', 'keyring.json')), 'old folder kept');
+  fs.writeFileSync(path.join(home, '.env-lock', 'keyring.json'), '{"k":"planted"}');
+  assert.strictEqual(await M.migrateHome(home), 'exists', 'never runs again');
+  assert.strictEqual(fs.readFileSync(path.join(home, '.env-safety', 'keyring.json'), 'utf8'), '{"k":1}', 'existing keyring untouched');
+});
+
+test('migrate: a ~/.env-lock that is a link is not followed', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'envsafety-home-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'envsafety-planted-'));
+  fs.writeFileSync(path.join(elsewhere, 'keyring.json'), '{"k":"attacker"}');
+  fs.symlinkSync(elsewhere, path.join(home, '.env-lock'), 'junction');
+  assert.strictEqual(await M.migrateHome(home), 'none');
+  assert.ok(!fs.existsSync(path.join(home, '.env-safety')));
+});
+
+test('agent rules: a block written by Env Lock is replaced, not duplicated', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'envsafety-rules-'));
+  fs.writeFileSync(path.join(root, '.cursorignore'), 'mine\n# >>> env-lock (managed, do not edit) >>>\nold\n# <<< env-lock <<<\n');
+  await applyAgentRules(root, ['**/.env'], []);
+  const t = fs.readFileSync(path.join(root, '.cursorignore'), 'utf8');
+  assert.ok(t.startsWith('mine\n'), 'user lines kept');
+  assert.ok(!t.includes('env-lock') && !t.includes('\nold\n'), 'legacy block gone');
+  assert.strictEqual(t.split('>>> env-safety').length, 2, 'exactly one Env Safety block');
 });

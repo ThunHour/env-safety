@@ -5,7 +5,7 @@ import { KeyringFile, parseKeyring } from './crypto';
 
 /** Outside every project, so it is never part of a workspace an agent works in. */
 export function defaultKeyringPath(): string {
-  return path.join(os.homedir(), '.env-lock', 'keyring.json');
+  return path.join(os.homedir(), '.env-safety', 'keyring.json');
 }
 
 export function expandHome(p: string): string {

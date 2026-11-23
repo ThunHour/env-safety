@@ -1,9 +1,9 @@
 {
-  "name": "env-lock",
-  "displayName": "Env Lock — post-quantum secret lock for AI agents",
+  "name": "env-safety",
+  "displayName": "Env Safety — post-quantum secret lock for AI agents",
   "description": "Encrypts .env and other secret files (any language) with ML-KEM-768 + X25519 while AI coding agents work, and writes deny rules for Claude Code, Cursor, Cline, Gemini and others.",
-  "version": "0.7.5",
-  "publisher": "local",
+  "version": "0.8.0",
+  "publisher": "SeakKimhour",
   "author": "Seak Kimhour",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -43,168 +43,168 @@
   "contributes": {
     "commands": [
       {
-        "command": "envLock.setupKeys",
+        "command": "envSafety.setupKeys",
         "title": "Set up post-quantum keys",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.changePassphrase",
+        "command": "envSafety.changePassphrase",
         "title": "Change passphrase / key file",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.revealKeyring",
+        "command": "envSafety.revealKeyring",
         "title": "Reveal keyring (for backup)",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.lock",
+        "command": "envSafety.lock",
         "title": "Lock all secret files",
-        "category": "Env Lock",
+        "category": "Env Safety",
         "icon": "$(lock)"
       },
       {
-        "command": "envLock.unlock",
+        "command": "envSafety.unlock",
         "title": "Unlock all secret files",
-        "category": "Env Lock",
+        "category": "Env Safety",
         "icon": "$(unlock)"
       },
       {
-        "command": "envLock.toggle",
+        "command": "envSafety.toggle",
         "title": "Toggle lock",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.runWithSecrets",
+        "command": "envSafety.runWithSecrets",
         "title": "Run a command with secrets (in memory)",
-        "category": "Env Lock",
+        "category": "Env Safety",
         "icon": "$(key)"
       },
       {
-        "command": "envLock.choosePresets",
+        "command": "envSafety.choosePresets",
         "title": "Choose secret file types (languages)",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.showProtected",
+        "command": "envSafety.showProtected",
         "title": "Show protected files",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.applyAgentRules",
+        "command": "envSafety.applyAgentRules",
         "title": "Write AI agent deny rules",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.protectFile",
-        "title": "Env Lock: Protect this file",
-        "category": "Env Lock"
+        "command": "envSafety.protectFile",
+        "title": "Env Safety: Protect this file",
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.unprotectFile",
-        "title": "Env Lock: Stop protecting this file",
-        "category": "Env Lock"
+        "command": "envSafety.unprotectFile",
+        "title": "Env Safety: Stop protecting this file",
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.unlockFile",
-        "title": "Env Lock: Unlock this file",
-        "category": "Env Lock",
+        "command": "envSafety.unlockFile",
+        "title": "Env Safety: Unlock this file",
+        "category": "Env Safety",
         "icon": "$(unlock)"
       },
       {
-        "command": "envLock.lockFile",
-        "title": "Env Lock: Lock this file",
-        "category": "Env Lock",
+        "command": "envSafety.lockFile",
+        "title": "Env Safety: Lock this file",
+        "category": "Env Safety",
         "icon": "$(lock)"
       },
       {
-        "command": "envLock.revealVault",
+        "command": "envSafety.revealVault",
         "title": "Reveal this project's vault folder",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.setPhrase",
+        "command": "envSafety.setPhrase",
         "title": "Set anti-phishing phrase",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.backup",
+        "command": "envSafety.backup",
         "title": "Back up keys and vault",
-        "category": "Env Lock"
+        "category": "Env Safety"
       },
       {
-        "command": "envLock.showLog",
+        "command": "envSafety.showLog",
         "title": "Show security log",
-        "category": "Env Lock"
+        "category": "Env Safety"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "envLock.protectFile",
+          "command": "envSafety.protectFile",
           "when": "!explorerResourceIsFolder && resourceExtname != .locked",
-          "group": "7_envlock@1"
+          "group": "7_envsafety@1"
         },
         {
-          "command": "envLock.unprotectFile",
+          "command": "envSafety.unprotectFile",
           "when": "!explorerResourceIsFolder && resourceExtname != .locked",
-          "group": "7_envlock@2"
+          "group": "7_envsafety@2"
         },
         {
-          "command": "envLock.unlockFile",
+          "command": "envSafety.unlockFile",
           "when": "!explorerResourceIsFolder && resourceExtname == .locked",
-          "group": "7_envlock@1"
+          "group": "7_envsafety@1"
         },
         {
-          "command": "envLock.lockFile",
-          "when": "!explorerResourceIsFolder && resourcePath in envLock.plainFiles",
-          "group": "7_envlock@0"
+          "command": "envSafety.lockFile",
+          "when": "!explorerResourceIsFolder && resourcePath in envSafety.plainFiles",
+          "group": "7_envsafety@0"
         }
       ],
       "editor/title": [
         {
-          "command": "envLock.lockFile",
-          "when": "resourceScheme == file && resourcePath in envLock.plainFiles",
+          "command": "envSafety.lockFile",
+          "when": "resourceScheme == file && resourcePath in envSafety.plainFiles",
           "group": "navigation@-100"
         },
         {
-          "command": "envLock.unlockFile",
+          "command": "envSafety.unlockFile",
           "when": "resourceScheme == file && resourceExtname == .locked",
           "group": "navigation@-100"
         }
       ],
       "editor/title/context": [
         {
-          "command": "envLock.lockFile",
-          "when": "resourceScheme == file && resourcePath in envLock.plainFiles",
-          "group": "7_envlock@0"
+          "command": "envSafety.lockFile",
+          "when": "resourceScheme == file && resourcePath in envSafety.plainFiles",
+          "group": "7_envsafety@0"
         },
         {
-          "command": "envLock.unlockFile",
+          "command": "envSafety.unlockFile",
           "when": "resourceScheme == file && resourceExtname == .locked",
-          "group": "7_envlock@0"
+          "group": "7_envsafety@0"
         },
         {
-          "command": "envLock.protectFile",
+          "command": "envSafety.protectFile",
           "when": "resourceScheme == file && resourceExtname != .locked",
-          "group": "7_envlock@1"
+          "group": "7_envsafety@1"
         }
       ],
       "commandPalette": [
         {
-          "command": "envLock.unlockFile",
+          "command": "envSafety.unlockFile",
           "when": "resourceExtname == .locked"
         },
         {
-          "command": "envLock.lockFile",
-          "when": "resourcePath in envLock.plainFiles"
+          "command": "envSafety.lockFile",
+          "when": "resourcePath in envSafety.plainFiles"
         }
       ]
     },
     "configuration": {
-      "title": "Env Lock",
+      "title": "Env Safety",
       "properties": {
-        "envLock.presets": {
+        "envSafety.presets": {
           "type": "array",
           "items": {
             "type": "string",
@@ -232,18 +232,18 @@
           "default": [
             "auto"
           ],
-          "markdownDescription": "Kinds of secret files to lock. `auto` = dotenv + cloud credentials + every language detected in the workspace (package.json → node, pom.xml → java, pubspec.yaml → flutter…). Run **Env Lock: Choose secret file types** to pick visually. A project may add presets in its own settings, never remove them."
+          "markdownDescription": "Kinds of secret files to lock. `auto` = dotenv + cloud credentials + every language detected in the workspace (package.json → node, pom.xml → java, pubspec.yaml → flutter…). Run **Env Safety: Choose secret file types** to pick visually. A project may add presets in its own settings, never remove them."
         },
-        "envLock.customPatterns": {
+        "envSafety.customPatterns": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Extra globs to lock, e.g. `config/secrets.yml` or `**/*.secret.json`. Right-click a file → **Env Lock: Protect this file** adds it here. A project may add patterns, never remove them.",
+          "markdownDescription": "Extra globs to lock, e.g. `config/secrets.yml` or `**/*.secret.json`. Right-click a file → **Env Safety: Protect this file** adds it here. A project may add patterns, never remove them.",
           "scope": "resource"
         },
-        "envLock.allowList": {
+        "envSafety.allowList": {
           "type": "array",
           "items": {
             "type": "string"
@@ -260,13 +260,13 @@
           "description": "Globs that are never locked (templates with no real secrets). User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.exclude": {
+        "envSafety.exclude": {
           "type": "string",
           "default": "**/{node_modules,.git,vendor,.venv,venv,Pods}/**",
           "description": "Folders to skip when searching (third-party code). Build output folders (build, dist, out, target, .next) are scanned last, with their own limit, because a build can copy a secret into them. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.storage": {
+        "envSafety.storage": {
           "type": "string",
           "enum": [
             "vault",
@@ -280,44 +280,44 @@
           "scope": "application",
           "markdownDescription": "Where locked secret files are kept. Files already locked in place still unlock in either mode. User settings only: a project (and any AI agent working in it) cannot change it."
         },
-        "envLock.vaultPath": {
+        "envSafety.vaultPath": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Folder holding every project's vault. Empty = `~/.env-lock/vault`. Keep it outside your projects and **back it up** with your keyring."
+          "markdownDescription": "Folder holding every project's vault. Empty = `~/.env-safety/vault`. Keep it outside your projects and **back it up** with your keyring."
         },
-        "envLock.vaultId": {
+        "envSafety.vaultId": {
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "This project's vault id, like .NET's `UserSecretsId`. Set automatically on the first lock; safe to commit (it is not a secret). Locked files are in `<vaultPath>/<vaultId>/`. Pinned on first use: if a project changes it, Env Lock warns and keeps using the pinned vault."
+          "markdownDescription": "This project's vault id, like .NET's `UserSecretsId`. Set automatically on the first lock; safe to commit (it is not a secret). Locked files are in `<vaultPath>/<vaultId>/`. Pinned on first use: if a project changes it, Env Safety warns and keeps using the pinned vault."
         },
-        "envLock.keyringPath": {
+        "envSafety.keyringPath": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Where your post-quantum keyring lives. Empty = `~/.env-lock/keyring.json`. Its private key is passphrase-encrypted. **Back it up.**"
+          "markdownDescription": "Where your post-quantum keyring lives. Empty = `~/.env-safety/keyring.json`. Its private key is passphrase-encrypted. **Back it up.**"
         },
-        "envLock.keyFile": {
+        "envSafety.keyFile": {
           "type": "string",
           "default": "",
           "scope": "machine",
           "description": "Optional key file (second factor) protecting the private key. Keep it outside your projects, ideally on removable media."
         },
-        "envLock.autoLockMinutes": {
+        "envSafety.autoLockMinutes": {
           "type": "number",
           "default": 5,
           "minimum": 0,
           "description": "Re-lock automatically this many minutes after secrets become readable. 0 disables. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.confirmUnlockToDisk": {
+        "envSafety.confirmUnlockToDisk": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Ask before unlocking secrets to disk (where AI agents can read them), listing installed AI extensions and offering **Open terminal with secrets** (in memory) instead. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.agentExtensions": {
+        "envSafety.agentExtensions": {
           "type": "array",
           "items": {
             "type": "string"
@@ -340,19 +340,19 @@
           "description": "IDs of AI extensions. They run inside VS Code where terminal detection cannot see them: unlocking warns about them, and installing one re-locks your secrets. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.lockOnStartup": {
+        "envSafety.lockOnStartup": {
           "type": "boolean",
           "default": true,
           "description": "Lock readable secret files as soon as the workspace opens. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.lockWhenAgentStarts": {
+        "envSafety.lockWhenAgentStarts": {
           "type": "boolean",
           "default": true,
           "description": "Lock immediately when an AI agent CLI starts in a VS Code terminal. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.agentCommands": {
+        "envSafety.agentCommands": {
           "type": "array",
           "items": {
             "type": "string"
@@ -371,12 +371,12 @@
           "description": "Terminal commands / terminal names treated as AI agents. User settings only: a project (and any AI agent working in it) cannot change it.",
           "scope": "application"
         },
-        "envLock.autoApplyAgentRules": {
+        "envSafety.autoApplyAgentRules": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Write deny/ignore rule files for AI agents (`.cursorignore`, `.clineignore`, `.geminiignore`, `.codeiumignore`, `.aiderignore`, `.claude/settings.json` + hook) into the project folder every time you lock. Off by default: locked files are already encrypted. Run **Env Lock: Write AI agent deny rules** to write them once by hand."
+          "markdownDescription": "Write deny/ignore rule files for AI agents (`.cursorignore`, `.clineignore`, `.geminiignore`, `.codeiumignore`, `.aiderignore`, `.claude/settings.json` + hook) into the project folder every time you lock. Off by default: locked files are already encrypted. Run **Env Safety: Write AI agent deny rules** to write them once by hand."
         },
-        "envLock.lockOnClose": {
+        "envSafety.lockOnClose": {
           "type": "boolean",
           "default": true,
           "description": "Re-lock readable secret files when the VS Code window closes. User settings only: a project (and any AI agent working in it) cannot change it.",

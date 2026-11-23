@@ -1,6 +1,6 @@
-# Contributing to Env Lock
+# Contributing to Env Safety
 
-Thanks for helping. Env Lock protects people's secrets, so every change is judged first on whether it keeps
+Thanks for helping. Env Safety protects people's secrets, so every change is judged first on whether it keeps
 them safe.
 
 ## Set up
@@ -9,7 +9,7 @@ Requirements: Node.js 18+ and VS Code 1.93+, plus git (the red-team run uses it)
 
 ```powershell
 git clone <this repository>
-cd env-lock
+cd env-safety
 npm install
 npm test
 ```

@@ -1,7 +1,7 @@
 /**
- * Env Lock vault: like .NET User Secrets, but encrypted.
+ * Env Safety vault: like .NET User Secrets, but encrypted.
  *
- * The project keeps only an id (envLock.vaultId). The encrypted secret files live OUTSIDE the
+ * The project keeps only an id (envSafety.vaultId). The encrypted secret files live OUTSIDE the
  * project, in <vaultRoot>/<id>/, so an AI agent working in the project folder never sees them.
  *
  *   <vaultRoot>/<id>/vault.json        { format, v, salt }   (no secrets, no file names)
@@ -34,7 +34,7 @@ export interface VaultEnvelope {
   path: string; // relative to the project root, forward slashes
   data: Buffer;
   lockedAt: number;
-  sign: SignCheck; // made by this machine's Env Lock, for this file? (see signLocked)
+  sign: SignCheck; // made by this machine's Env Safety, for this file? (see signLocked)
 }
 
 const PREV = '.prev';
@@ -44,7 +44,7 @@ export const vaultBinding = (v: Vault, rel: string) => `vault:${v.id}:${normaliz
 export const fileBinding = (rel: string) => `file:${normalizeRel(rel)}`;
 
 export function defaultVaultRoot(): string {
-  return path.join(os.homedir(), '.env-lock', 'vault');
+  return path.join(os.homedir(), '.env-safety', 'vault');
 }
 
 export function newVaultId(): string {
@@ -71,7 +71,7 @@ export async function openVault(root: string, id: string): Promise<Vault> {
   const meta = path.join(dir, META);
   try {
     const j = JSON.parse(await fs.readFile(meta, 'utf8'));
-    if (j.format !== VAULT_FORMAT || typeof j.salt !== 'string') throw new Error(`${meta} is not an Env Lock vault.`);
+    if (j.format !== VAULT_FORMAT || typeof j.salt !== 'string') throw new Error(`${meta} is not an Env Safety vault.`);
     return { id, dir, salt: Buffer.from(j.salt, 'base64') };
   } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;

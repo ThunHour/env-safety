@@ -3,8 +3,8 @@
  *
  * vscode.workspace.findFiles honours .ignore / .rgignore files and search/files.exclude settings,
  * all of which live in the project where an agent can write them: red-team test T25 hid a .env
- * file from Env Lock that way, so it was never locked. This walk only skips what YOUR (user-level)
- * envLock.exclude says, never follows links into other folders, and stops at fixed limits so a
+ * file from Env Safety that way, so it was never locked. This walk only skips what YOUR (user-level)
+ * envSafety.exclude says, never follows links into other folders, and stops at fixed limits so a
  * huge planted tree cannot hang VS Code.
  */
 import * as fs from 'fs/promises';

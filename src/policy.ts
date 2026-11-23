@@ -53,7 +53,7 @@ export function additiveValue(i: Inspected<string[]> | undefined, fallback: stri
 /**
  * Parses a VS Code settings file (JSON with comments and trailing commas). undefined if it cannot.
  * Needed because VS Code drops application/machine-scoped values from a project's settings before
- * an extension can inspect them: to TELL you a project tried to weaken Env Lock, it must read the
+ * an extension can inspect them: to TELL you a project tried to weaken Env Safety, it must read the
  * file itself (red-team test T07).
  */
 export function parseJsonc(text: string): Record<string, unknown> | undefined {

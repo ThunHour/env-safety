@@ -15,9 +15,9 @@
     },
     {
       // docs/attack-tests.md: own settings, credential storage, extensions and keyring under
-      // .attack-test/, so attacks never touch your real VS Code or ~/.env-lock.
+      // .attack-test/, so attacks never touch your real VS Code or ~/.env-safety.
       // Run `npm run attack setup` once before the first launch.
-      "name": "Env Lock: attack tests (isolated)",
+      "name": "Env Safety: attack tests (isolated)",
       "type": "extensionHost",
       "request": "launch",
       "args": [

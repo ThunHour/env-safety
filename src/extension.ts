@@ -31,6 +31,7 @@ import { DEFAULT_ALLOW, DOTENV_PATTERNS, expandBraces, isSafePattern, matchesAny
 import { dotenvModes, dotenvPlan, parseDotenv } from './dotenv';
 import { scanFiles } from './scan';
 import { containsSecret, mergePrints, printsOf, SecretPrints } from './copies';
+import { LEGACY_HOME_DIR, LEGACY_SECTION, migrateHome } from './migrate';
 import { applyAgentRules } from './agentRules';
 import {
   ADDITIVE_KEYS,
@@ -82,12 +83,12 @@ function closeSecretTerminals(why: string) {
   secretTerminals.clear();
   log.info(`Closed secrets terminal(s): ${why}`);
 }
-let state: vscode.Memento; // only used to migrate records from Env Lock 0.4.0
+let state: vscode.Memento; // only used to migrate records from Env Safety 0.4.0
 let log: vscode.LogOutputChannel;
 
 // ================================================================= protected records
 //
-// Env Lock's own records (vault pins, newest versions, your "stop protecting" exceptions, and the
+// Env Safety's own records (vault pins, newest versions, your "stop protecting" exceptions, and the
 // security settings you approved) must not live in plain files: settings.json and VS Code's
 // state.vscdb are ordinary files an agent can edit. They are kept in SecretStorage, which VS Code
 // encrypts with the OS credential store (DPAPI on Windows).
@@ -103,13 +104,13 @@ interface Records {
   runFiles?: Record<string, Record<string, string>>; // run folder -> file deciding what runs -> hash
   copyPrints?: SecretPrints; // keyed hashes of locked secret values, to find copies left elsewhere (see copies.ts)
 }
-const RECORDS_SECRET = 'envLock.records.v1';
+const RECORDS_SECRET = 'envSafety.records.v1';
 let records: Records = { pins: {}, latest: {}, allow: {} };
-/** Env Lock's records were wiped (reinstalled): signatures by a lost random key can only be confirmed by you. */
+/** Env Safety's records were wiped (reinstalled): signatures by a lost random key can only be confirmed by you. */
 let recordsReset = false;
 let recordsWrite: Promise<void> = Promise.resolve();
 
-async function loadRecords() {
+async function loadRecords(migrated = false) {
   const raw = await secrets.get(RECORDS_SECRET);
   let tampered = false;
   if (raw) {
@@ -122,23 +123,35 @@ async function loadRecords() {
   } else if ((await readTrust())?.hasRecords) {
     tampered = true; // trust says records existed: someone deleted them (e.g. to reset rollback protection)
   } else if (!(await readTrust()) && (await fs.access(keyringPath()).then(() => true, () => false))) {
-    // No records and no trust, but a keyring: Env Lock has been used here before and its whole
+    // No records and no trust, but a keyring: Env Safety has been used here before and its whole
     // credential store is gone. VS Code wipes it when an extension is uninstalled, so an agent can
-    // reset Env Lock with `code --uninstall-extension` + `--install-extension` (red-team test T30).
+    // reset Env Safety with `code --uninstall-extension` + `--install-extension` (red-team test T30).
     recordsReset = true;
-    log.error('Env Lock records and trust are missing although a keyring exists: Env Lock was reinstalled, or its store was wiped.');
-    void vscode.window.showErrorMessage(
-      'Env Lock: its protected records are gone although you have keys: Env Lock was uninstalled and reinstalled ' +
-        '(by you, or by something running as you), or its credential store was wiped. Rollback protection, vault pins, ' +
-        'approved settings and your anti-phishing phrase start over: set the phrase again before typing your passphrase. ' +
-        'Your files still unlock with your passphrase. If you did not reinstall Env Lock, check your extensions.',
-      { modal: true }
-    );
+    if (migrated) {
+      // Expected once when moving from Env Lock: its credential store belonged to the old extension id.
+      log.warn(`Took over the keyring and vaults of Env Lock (~/${LEGACY_HOME_DIR}); records start over.`);
+      void vscode.window.showWarningMessage(
+        `Env Safety (formerly Env Lock) took over your keys and vaults from ~/${LEGACY_HOME_DIR} (kept there as a backup). ` +
+          'Its protected records (rollback history, vault pins, approved settings, anti-phishing phrase) start over: ' +
+          'set your anti-phishing phrase again, then unlock once with your passphrase to pin your keyring. ' +
+          'If you did NOT just install Env Safety in place of Env Lock, something reset it: check your extensions.',
+        { modal: true }
+      );
+    } else {
+      log.error('Env Safety records and trust are missing although a keyring exists: Env Safety was reinstalled, or its store was wiped.');
+      void vscode.window.showErrorMessage(
+        'Env Safety: its protected records are gone although you have keys: Env Safety was uninstalled and reinstalled ' +
+          '(by you, or by something running as you), or its credential store was wiped. Rollback protection, vault pins, ' +
+          'approved settings and your anti-phishing phrase start over: set the phrase again before typing your passphrase. ' +
+          'Your files still unlock with your passphrase. If you did not reinstall Env Safety, check your extensions.',
+        { modal: true }
+      );
+    }
   }
   if (tampered) {
-    log.error('Env Lock records were deleted or damaged in the credential store.');
+    log.error('Env Safety records were deleted or damaged in the credential store.');
     void vscode.window.showErrorMessage(
-      'Env Lock: its protected records (vault pins, version history, approved settings) were deleted or damaged. ' +
+      'Env Safety: its protected records (vault pins, version history, approved settings) were deleted or damaged. ' +
         'If you did not reset VS Code, something tampered with them. Locked files stay encrypted; ' +
         'settings now start from the secure defaults. Check the security log.'
     );
@@ -169,7 +182,7 @@ function saveRecords(): Promise<void> {
 //
 // Read from the settings you APPROVED (kept in the protected records), not from settings.json
 // directly. A change that weakens protection only takes effect after you confirm it, so an agent
-// editing %APPDATA%/Code/User/settings.json cannot switch Env Lock off.
+// editing %APPDATA%/Code/User/settings.json cannot switch Env Safety off.
 
 const liveSecure = () => Object.fromEntries(REVIEWED_KEYS.map((k) => [k, secureValue(cfg().inspect(k), undefined)]));
 let selfUpdate = 0; // our own settings writes (e.g. choosing a key file) are approved already
@@ -207,10 +220,10 @@ async function reviewSettings(reason: string) {
     const weak = weakenings(records.settings, live);
     const accepted = { ...live };
     if (weak.length) {
-      const list = weak.map((k) => `envLock.${k}: ${JSON.stringify(records.settings![k])} → ${JSON.stringify(live[k])}`).join('\n');
+      const list = weak.map((k) => `envSafety.${k}: ${JSON.stringify(records.settings![k])} → ${JSON.stringify(live[k])}`).join('\n');
       log.warn(`Settings weakened (${reason}):\n${list}`);
       const keep = await vscode.window.showWarningMessage(
-        `Env Lock: these settings were changed to make protection WEAKER:\n\n${list}\n\n` +
+        `Env Safety: these settings were changed to make protection WEAKER:\n\n${list}\n\n` +
           'Your user settings file can be edited by AI agents too. Did you make this change yourself?',
         { modal: true },
         'Yes, I changed them'
@@ -245,7 +258,7 @@ const autoLockMinutes = () => secure<number>('autoLockMinutes', 5);
 
 // Files you chose to stop protecting, per project. Kept in VS Code's user storage, not in the
 // project, so an agent cannot "unprotect" files by editing .vscode/settings.json.
-const ALLOW_STATE = 'envLock.projectAllow';
+const ALLOW_STATE = 'envSafety.projectAllow';
 const projectAllow = () => records.allow;
 async function setProjectAllow(folder: vscode.WorkspaceFolder, list: string[]) {
   records.allow = { ...records.allow, [folder.uri.fsPath]: list };
@@ -263,7 +276,7 @@ async function auditProjectSettings() {
     const file = f.uri.scheme === 'file' ? await fs.readFile(path.join(f.uri.fsPath, '.vscode', 'settings.json'), 'utf8').catch(() => '') : '';
     const fromFile = (file && parseJsonc(file)) || {};
     for (const k of SECURE_KEYS) {
-      const v = cfg(f.uri).inspect(k)?.workspaceFolderValue ?? fromFile[`envLock.${k}`];
+      const v = cfg(f.uri).inspect(k)?.workspaceFolderValue ?? fromFile[`envSafety.${k}`];
       if (v !== undefined) inspects[`${k} (${f.name})`] = { ...cfg().inspect(k), workspaceFolderValue: v, workspaceValue: undefined };
     }
   }
@@ -273,12 +286,12 @@ async function auditProjectSettings() {
   warnedOverrides = sig;
   log.warn(`Ignored project settings that would weaken protection: ${ignored.join(', ')}`);
   void vscode.window.showWarningMessage(
-    `Env Lock: ignored settings in this project's .vscode/settings.json: ${ignored.map((k) => 'envLock.' + k).join(', ')}. ` +
-      'A project (and any AI agent working in it) cannot weaken Env Lock. Set them in your User settings if you really want them.'
+    `Env Safety: ignored settings in this project's .vscode/settings.json: ${ignored.map((k) => 'envSafety.' + k).join(', ')}. ` +
+      'A project (and any AI agent working in it) cannot weaken Env Safety. Set them in your User settings if you really want them.'
   );
 }
 
-const cfg = (scope?: vscode.Uri) => vscode.workspace.getConfiguration('envLock', scope);
+const cfg = (scope?: vscode.Uri) => vscode.workspace.getConfiguration('envSafety', scope);
 const exclude = () => secure<string>('exclude', '**/{node_modules,.git}/**');
 const rel = (u: vscode.Uri) => vscode.workspace.asRelativePath(u, false).replace(/\\/g, '/');
 
@@ -296,10 +309,10 @@ function warnUnsafePatterns(bad: string[]) {
   const sig = bad.join('\n');
   if (!bad.length || sig === warnedUnsafe) return;
   warnedUnsafe = sig;
-  log.warn(`Ignored envLock.customPatterns that are too complex to match safely: ${bad.join(', ')}`);
+  log.warn(`Ignored envSafety.customPatterns that are too complex to match safely: ${bad.join(', ')}`);
   void vscode.window.showWarningMessage(
-    `Env Lock: ignored envLock.customPatterns too complex to match safely (they could freeze VS Code): ${bad.join(', ')}. ` +
-      'If a project added them and you did not, something may be trying to stop Env Lock.'
+    `Env Safety: ignored envSafety.customPatterns too complex to match safely (they could freeze VS Code): ${bad.join(', ')}. ` +
+      'If a project added them and you did not, something may be trying to stop Env Safety.'
   );
 }
 
@@ -344,11 +357,47 @@ function vaultRoot(): string {
   return p ? expandHome(p) : defaultVaultRoot();
 }
 
+/** envLock.vaultId from the folder's .vscode/settings.json (written by Env Lock before the rename). */
+async function legacyVaultId(folder: vscode.WorkspaceFolder): Promise<string | undefined> {
+  const text = await fs.readFile(path.join(folder.uri.fsPath, '.vscode', 'settings.json'), 'utf8').catch(() => '');
+  const v = parseJsonc(text)?.[`${LEGACY_SECTION}.vaultId`];
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Env Safety was called Env Lock before 0.8.0. Copies your Env Lock user settings (envLock.*) to
+ * envSafety.* once. Safe even if an agent weakened them: the settings review that follows starts from
+ * the secure defaults and asks you about every weakening (see reviewSettings).
+ */
+async function migrateLegacySettings(): Promise<string[]> {
+  const all = vscode.workspace.getConfiguration();
+  const moved: string[] = [];
+  selfUpdate++;
+  try {
+    for (const k of [...REVIEWED_KEYS, 'autoApplyAgentRules']) {
+      const v = all.inspect(`${LEGACY_SECTION}.${k}`)?.globalValue;
+      if (v === undefined || cfg().inspect(k)?.globalValue !== undefined) continue;
+      await cfg().update(k, v, vscode.ConfigurationTarget.Global);
+      moved.push(k);
+    }
+  } catch (e) {
+    log.warn(`Could not copy Env Lock settings: ${(e as Error).message}`);
+  } finally {
+    selfUpdate--;
+  }
+  return moved;
+}
+
 /** The folder's vault. create=false never writes settings (safe during shutdown). */
 async function folderVault(folder: vscode.WorkspaceFolder, create: boolean): Promise<Vault | undefined> {
   const c = cfg(folder.uri);
   let id = c.get<string>('vaultId', '').trim();
-  if (id && !isValidVaultId(id)) throw new Error(`envLock.vaultId "${id}" is not valid.`);
+  if (!id) {
+    // Env Lock (before 0.8.0) wrote envLock.vaultId: keep using that vault, under the new key.
+    id = (await legacyVaultId(folder)) ?? '';
+    if (id && isValidVaultId(id) && create) await c.update('vaultId', id, vscode.ConfigurationTarget.WorkspaceFolder);
+  }
+  if (id && !isValidVaultId(id)) throw new Error(`envSafety.vaultId "${id}" is not valid.`);
   // vaultId lives in the project, where an agent can edit it (e.g. to point at another project's
   // vault, or a fresh one). The first id seen for this folder is pinned in the protected records.
   const pins = records.pins;
@@ -359,7 +408,7 @@ async function folderVault(folder: vscode.WorkspaceFolder, create: boolean): Pro
       log.warn(`vaultId of ${folder.name} changed in .vscode/settings.json: "${id}" (pinned: "${pinned}")`);
       void vscode.window
         .showWarningMessage(
-          `Env Lock: envLock.vaultId in ${folder.name}/.vscode/settings.json changed to "${id || '(removed)'}". ` +
+          `Env Safety: envSafety.vaultId in ${folder.name}/.vscode/settings.json changed to "${id || '(removed)'}". ` +
             `Still using your vault "${pinned}". If you changed it yourself, switch to the new id.`,
           'Use the new id'
         )
@@ -402,8 +451,8 @@ async function folderVault(folder: vscode.WorkspaceFolder, create: boolean): Pro
   if (onDisk !== vault.salt.toString('base64')) {
     vaultCache.delete(key);
     throw new Error(
-      `vault.json of vault "${id}" was changed by something other than Env Lock (its salt is not the one in use). ` +
-        'Restore that file from your backup ("Env Lock: Back up keys and vault").'
+      `vault.json of vault "${id}" was changed by something other than Env Safety (its salt is not the one in use). ` +
+        'Restore that file from your backup ("Env Safety: Back up keys and vault").'
     );
   }
   // vault.json is a plain file: a rewritten salt would make every blob look forged (or be used to
@@ -416,8 +465,8 @@ async function folderVault(folder: vscode.WorkspaceFolder, create: boolean): Pro
   } else if (pinnedSalt !== fp) {
     vaultCache.delete(key);
     throw new Error(
-      `vault.json of vault "${id}" was changed by something other than Env Lock (its salt is not the one pinned). ` +
-        'Restore that file from your backup ("Env Lock: Back up keys and vault").'
+      `vault.json of vault "${id}" was changed by something other than Env Safety (its salt is not the one pinned). ` +
+        'Restore that file from your backup ("Env Safety: Back up keys and vault").'
     );
   }
   return vault;
@@ -430,13 +479,13 @@ function reportVaultProblem(folder: vscode.WorkspaceFolder, e: unknown) {
   if (vaultProblemsWarned.has(msg)) return;
   vaultProblemsWarned.add(msg);
   log.error(`Vault unreadable: ${msg}`);
-  void vscode.window.showErrorMessage(`Env Lock: cannot read the vault of ${msg}`, 'Show vault folder').then((pick) => {
+  void vscode.window.showErrorMessage(`Env Safety: cannot read the vault of ${msg}`, 'Show vault folder').then((pick) => {
     if (pick) void revealVaultCommand();
   });
 }
 
 const vaultCache = new Map<string, Promise<Vault>>();
-const VAULT_PINS = 'envLock.vaultPins';
+const VAULT_PINS = 'envSafety.vaultPins';
 const vaultIdWarned = new Set<string>();
 
 async function vaultItems(): Promise<VaultItem[]> {
@@ -463,16 +512,16 @@ function inPlaceBinding(plainPath: string): string {
 }
 
 /**
- * Every file of the workspace's local folders. Env Lock walks them itself instead of using
+ * Every file of the workspace's local folders. Env Safety walks them itself instead of using
  * vscode.workspace.findFiles, which honours .ignore / .rgignore / search.exclude / files.exclude:
- * project files an agent can write to hide a secret from Env Lock (red-team test T25).
+ * project files an agent can write to hide a secret from Env Safety (red-team test T25).
  */
 async function workspaceFiles(): Promise<Array<{ folder: vscode.WorkspaceFolder; rel: string }>> {
   let ex: string[];
   try {
     ex = expandBraces(exclude());
   } catch {
-    ex = ['**/node_modules/**', '**/.git/**']; // unusable envLock.exclude: still never skip secrets elsewhere
+    ex = ['**/node_modules/**', '**/.git/**']; // unusable envSafety.exclude: still never skip secrets elsewhere
   }
   const out: Array<{ folder: vscode.WorkspaceFolder; rel: string }> = [];
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
@@ -490,8 +539,8 @@ function warnTruncated(folder: vscode.WorkspaceFolder) {
   truncatedWarned.add(folder.uri.fsPath);
   log.warn(`${folder.name}: too many files or folders too deep to scan completely; some secret files may be missed`);
   void vscode.window.showWarningMessage(
-    `Env Lock: ${folder.name} has too many files (or folders nested too deep) to scan completely, so some secret files may be missed. ` +
-      'Add large generated folders to envLock.exclude in your User settings.'
+    `Env Safety: ${folder.name} has too many files (or folders nested too deep) to scan completely, so some secret files may be missed. ` +
+      'Add large generated folders to envSafety.exclude in your User settings.'
   );
 }
 
@@ -552,8 +601,8 @@ async function templatesWithSecrets(templates: vscode.Uri[]): Promise<vscode.Uri
       warnedTemplates.add(k);
       log.warn(`Template holds a real secret value, locked like a secret: ${rel(u)}`);
       void vscode.window.showWarningMessage(
-        `Env Lock: ${rel(u)} is a template (normally never locked) but holds a real value of a secret you locked. ` +
-          'Something (an AI agent?) may have copied or renamed a secret file to it while it was unlocked. Env Lock locks it like a secret.'
+        `Env Safety: ${rel(u)} is a template (normally never locked) but holds a real value of a secret you locked. ` +
+          'Something (an AI agent?) may have copied or renamed a secret file to it while it was unlocked. Env Safety locks it like a secret.'
       );
     }
   }
@@ -562,7 +611,7 @@ async function templatesWithSecrets(templates: vscode.Uri[]): Promise<vscode.Uri
 
 let warnedCopies = '';
 /**
- * After a lock: look for copies of the locked secret values in files Env Lock does not lock
+ * After a lock: look for copies of the locked secret values in files Env Safety does not lock
  * (notes.txt, src/config.js…), made while they were unlocked (red-team X2/X7), and report them.
  */
 async function huntCopies() {
@@ -589,9 +638,9 @@ async function huntCopies() {
     if (!found.length || sig === warnedCopies) return;
     warnedCopies = sig;
     const names = found.map(rel).join(', ');
-    log.error(`Copies of locked secret values found in files Env Lock does not lock: ${names}`);
+    log.error(`Copies of locked secret values found in files Env Safety does not lock: ${names}`);
     const pick = await vscode.window.showErrorMessage(
-      `Env Lock: copies of locked secret values are still readable in: ${names}. If you did not put them there, something ` +
+      `Env Safety: copies of locked secret values are still readable in: ${names}. If you did not put them there, something ` +
         '(an AI agent?) copied them while your secrets were unlocked. Protect and lock these files, or remove the values and rotate the secrets.',
       'Protect and lock'
     );
@@ -607,7 +656,7 @@ async function huntCopies() {
     // This check starts inside a lock: wait for that lock to finish, or lockCommand would skip (busy).
     for (let i = 0; busy && i < 300; i++) await new Promise((r) => setTimeout(r, 100));
     if (!(await lockCommand(undefined, found))) {
-      void vscode.window.showErrorMessage(`Env Lock: could not lock ${names}; try "Env Lock: Lock all secret files".`);
+      void vscode.window.showErrorMessage(`Env Safety: could not lock ${names}; try "Env Safety: Lock all secret files".`);
     }
   } catch (e) {
     log.warn(`Looking for copies of secrets failed: ${(e as Error).message}`);
@@ -633,7 +682,7 @@ interface Trust {
   macKey: Buffer;
   hasRecords?: boolean; // protected records exist (their disappearance is then reported)
 }
-const TRUST_SECRET = 'envLock.trust.v1';
+const TRUST_SECRET = 'envSafety.trust.v1';
 let cachedTrust: Trust | undefined;
 
 async function readTrust(): Promise<Trust | undefined> {
@@ -652,7 +701,7 @@ async function readTrust(): Promise<Trust | undefined> {
 async function writeTrust(keyId: string, hasRecords?: boolean, macKey?: Buffer): Promise<Trust> {
   const old = await readTrust();
   // Normally the key derived from your private key (see macKeyFromPrivate); a random one only for
-  // keyrings pinned by an older Env Lock, which still verify through the stored copy.
+  // keyrings pinned by an older Env Safety, which still verify through the stored copy.
   const t: Trust = { keyId, macKey: macKey ?? old?.macKey ?? newMacKey(), hasRecords: hasRecords ?? old?.hasRecords };
   await secrets.store(
     TRUST_SECRET,
@@ -680,14 +729,14 @@ async function trustedFor(k: KeyringFile, interactive: boolean): Promise<Trust |
   if (!interactive) return undefined;
   const pick = t
     ? await vscode.window.showWarningMessage(
-        `Env Lock: your keyring changed. ${keyringPath()} now holds key ${k.keyId}, not your key ${t.keyId}. ` +
+        `Env Safety: your keyring changed. ${keyringPath()} now holds key ${k.keyId}, not your key ${t.keyId}. ` +
           'Something may have replaced it to read your secrets, so nothing was locked. ' +
           'Only trust it if you replaced it yourself (it needs that keyring\'s passphrase).',
         { modal: true },
         'Trust this keyring'
       )
     : await vscode.window.showWarningMessage(
-        'Env Lock: confirm your passphrase once so Env Lock can pin your keyring and sign locked files.',
+        'Env Safety: confirm your passphrase once so Env Safety can pin your keyring and sign locked files.',
         'Confirm passphrase'
       );
   if (!pick) return undefined;
@@ -706,20 +755,20 @@ async function loadKeyring(): Promise<KeyringFile | undefined> {
     if (!k) cachedPub = undefined;
     return k;
   } catch (e: any) {
-    vscode.window.showErrorMessage(`Env Lock: cannot read keyring ${keyringPath()}: ${e.message ?? e}`);
+    vscode.window.showErrorMessage(`Env Safety: cannot read keyring ${keyringPath()}: ${e.message ?? e}`);
     return undefined;
   }
 }
 
-// Anti-phishing: an agent can print "Env Lock passphrase:" in a terminal. A real prompt is always a
+// Anti-phishing: an agent can print "Env Safety passphrase:" in a terminal. A real prompt is always a
 // VS Code input box and shows a personal phrase that only you (and the OS credential store) know.
-const PHRASE_SECRET = 'envLock.phrase.v1';
+const PHRASE_SECRET = 'envSafety.phrase.v1';
 
 async function promptPass(prompt: string, isNew = false): Promise<string | undefined> {
   const phrase = await secrets.get(PHRASE_SECRET);
   return vscode.window.showInputBox({
-    title: phrase ? `Env Lock · your phrase: "${phrase}"` : 'Env Lock (set an anti-phishing phrase: "Env Lock: Set anti-phishing phrase")',
-    prompt: `${prompt}. Env Lock only ever asks here, never in a terminal${phrase ? ', and always shows your phrase above' : ''}.`,
+    title: phrase ? `Env Safety · your phrase: "${phrase}"` : 'Env Safety (set an anti-phishing phrase: "Env Safety: Set anti-phishing phrase")',
+    prompt: `${prompt}. Env Safety only ever asks here, never in a terminal${phrase ? ', and always shows your phrase above' : ''}.`,
     password: true,
     ignoreFocusOut: true,
     // Existing passphrases only need the old minimum; new ones must pass the strength check.
@@ -729,16 +778,16 @@ async function promptPass(prompt: string, isNew = false): Promise<string | undef
 
 async function setPhraseCommand(): Promise<boolean> {
   const phrase = await vscode.window.showInputBox({
-    title: 'Env Lock: anti-phishing phrase',
+    title: 'Env Safety: anti-phishing phrase',
     prompt:
-      'A short personal phrase shown in every real Env Lock passphrase prompt (e.g. "blue teapot 42"). ' +
+      'A short personal phrase shown in every real Env Safety passphrase prompt (e.g. "blue teapot 42"). ' +
       'If a prompt does not show it, or asks in a terminal, it is fake: do not type your passphrase.',
     ignoreFocusOut: true,
     validateInput: (v) => (v.trim().length < 4 ? 'At least 4 characters' : v.length > 40 ? 'At most 40 characters' : undefined),
   });
   if (!phrase) return false;
   await secrets.store(PHRASE_SECRET, phrase.trim());
-  vscode.window.showInformationMessage(`Env Lock: real passphrase prompts will now show "${phrase.trim()}".`);
+  vscode.window.showInformationMessage(`Env Safety: real passphrase prompts will now show "${phrase.trim()}".`);
   return true;
 }
 
@@ -748,7 +797,7 @@ async function askNewPassphrase(): Promise<string | undefined> {
   const p2 = await promptPass('Confirm the passphrase');
   if (p2 === undefined) return;
   if (p1 !== p2) {
-    vscode.window.showErrorMessage('Env Lock: passphrases do not match.');
+    vscode.window.showErrorMessage('Env Safety: passphrases do not match.');
     return;
   }
   return p1;
@@ -758,14 +807,14 @@ async function askNewPassphrase(): Promise<string | undefined> {
 async function loadKeyFile(): Promise<Buffer | null> {
   let file = expandHome(secure<string>('keyFile', '').trim());
   if (!file) {
-    const picked = await vscode.window.showOpenDialog({ title: 'Select your Env Lock key file', canSelectMany: false });
+    const picked = await vscode.window.showOpenDialog({ title: 'Select your Env Safety key file', canSelectMany: false });
     if (!picked?.length) return null;
     file = picked[0].fsPath;
   }
   try {
     return await fs.readFile(file);
   } catch {
-    vscode.window.showErrorMessage(`Env Lock: cannot read key file "${file}". Is the drive plugged in?`);
+    vscode.window.showErrorMessage(`Env Safety: cannot read key file "${file}". Is the drive plugged in?`);
     return null;
   }
 }
@@ -787,10 +836,10 @@ async function chooseKeyFile(): Promise<Buffer | null | undefined> {
   }
   let file: string;
   if (pick.id === 'new') {
-    const target = await vscode.window.showSaveDialog({ title: 'Save key file (outside your projects!)', filters: { 'Env Lock key': ['envkey'] } });
+    const target = await vscode.window.showSaveDialog({ title: 'Save key file (outside your projects!)', filters: { 'Env Safety key': ['envkey'] } });
     if (!target) return undefined;
     if (vscode.workspace.getWorkspaceFolder(target)) {
-      vscode.window.showErrorMessage('Env Lock: do not store the key file inside the workspace; agents could read it.');
+      vscode.window.showErrorMessage('Env Safety: do not store the key file inside the workspace; agents could read it.');
       return undefined;
     }
     file = target.fsPath;
@@ -817,13 +866,13 @@ async function unlockKeyring(k: KeyringFile, prompt: string): Promise<{ secret: 
   const secret: Secret = { passphrase, keyFile };
   try {
     const priv = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: 'Env Lock: deriving key…' },
+      { location: vscode.ProgressLocation.Window, title: 'Env Safety: deriving key…' },
       () => openKeyring(k, secret)
     );
     return { secret, priv };
   } catch (e) {
     if (e instanceof WrongPassphraseError) {
-      vscode.window.showErrorMessage('Env Lock: wrong passphrase or key file.');
+      vscode.window.showErrorMessage('Env Safety: wrong passphrase or key file.');
       return;
     }
     throw e;
@@ -833,7 +882,7 @@ async function unlockKeyring(k: KeyringFile, prompt: string): Promise<{ secret: 
 async function setupKeysCommand(): Promise<boolean> {
   const file = keyringPath();
   if (await readKeyring(file).catch(() => undefined)) {
-    vscode.window.showInformationMessage(`Env Lock: keys already exist at ${file}. Use "Change passphrase" to change protection.`);
+    vscode.window.showInformationMessage(`Env Safety: keys already exist at ${file}. Use "Change passphrase" to change protection.`);
     return true;
   }
   const keyFile = await chooseKeyFile();
@@ -841,7 +890,7 @@ async function setupKeysCommand(): Promise<boolean> {
   const passphrase = await askNewPassphrase();
   if (!passphrase) return false;
   const k = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Env Lock: generating ML-KEM-768 + X25519 key pair…' },
+    { location: vscode.ProgressLocation.Notification, title: 'Env Safety: generating ML-KEM-768 + X25519 key pair…' },
     () => createKeyring({ passphrase, keyFile: keyFile ?? undefined })
   );
   await writeKeyring(file, k);
@@ -852,7 +901,7 @@ async function setupKeysCommand(): Promise<boolean> {
   log.info(`New keyring ${k.keyId} created and pinned`);
   if (!(await secrets.get(PHRASE_SECRET))) await setPhraseCommand();
   const pick = await vscode.window.showWarningMessage(
-    `Env Lock: post-quantum keys created (id ${k.keyId}).\n\nBACK UP ${file}${keyFile ? ' and your key file' : ''}. ` +
+    `Env Safety: post-quantum keys created (id ${k.keyId}).\n\nBACK UP ${file}${keyFile ? ' and your key file' : ''}. ` +
       `Without it (and your passphrase) locked files can never be recovered.`,
     { modal: true },
     'Reveal keyring'
@@ -863,7 +912,7 @@ async function setupKeysCommand(): Promise<boolean> {
 
 async function changePassphraseCommand() {
   const k = await loadKeyring();
-  if (!k) return void vscode.window.showErrorMessage('Env Lock: no keys yet. Run "Set up post-quantum keys".');
+  if (!k) return void vscode.window.showErrorMessage('Env Safety: no keys yet. Run "Set up post-quantum keys".');
   const current = await unlockKeyring(k, 'CURRENT passphrase');
   if (!current) return;
   const keyFile = await chooseKeyFile();
@@ -872,7 +921,7 @@ async function changePassphraseCommand() {
   if (!passphrase) return;
   const next = await resealKeyring(k, current.secret, { passphrase, keyFile: keyFile ?? undefined });
   await writeKeyring(keyringPath(), next);
-  vscode.window.showInformationMessage('Env Lock: passphrase changed. Locked files stay valid (same key pair).');
+  vscode.window.showInformationMessage('Env Safety: passphrase changed. Locked files stay valid (same key pair).');
 }
 
 // ================================================================= lock / unlock
@@ -890,7 +939,7 @@ async function lockFiles(paths: string[], pub: PublicKeys, macKey: Buffer | unde
       const uri = vscode.Uri.file(p);
       const folder = vscode.workspace.getWorkspaceFolder(uri);
       const r = folder ? relTo(folder, uri) : p;
-      // A link named ".env" would make Env Lock read (and sign) whatever file it points to, and a later
+      // A link named ".env" would make Env Safety read (and sign) whatever file it points to, and a later
       // unlock would copy that file into the project: a sandboxed agent could read e.g. ~/.ssh this way.
       // Check, open, then check that the OPENED file is the one checked (no swap in between).
       const st = await fs.lstat(p);
@@ -981,9 +1030,9 @@ async function warnLinked(files: string[]) {
   }
   log.error(`NOT locked, link or hard link, plaintext still readable: ${parts.join('; ')}`);
   void vscode.window.showErrorMessage(
-    `Env Lock: NOT locked, still readable: ${parts.join('; ')}. The file is a link or has a second name on disk (a hard link), ` +
+    `Env Safety: NOT locked, still readable: ${parts.join('; ')}. The file is a link or has a second name on disk (a hard link), ` +
       'so its secret can also be read under the other name. Something may have made it while your secrets were unlocked. ' +
-      'Env Lock never encrypts a linked file (it could be a link to a file outside the project). ' +
+      'Env Safety never encrypts a linked file (it could be a link to a file outside the project). ' +
       'Delete the other name(s) and lock again; rotate the secret if you did not make the link.'
   );
 }
@@ -1001,7 +1050,7 @@ interface Latest {
   plainPath: string;
   label: string;
 }
-const LATEST = 'envLock.latest';
+const LATEST = 'envSafety.latest';
 const latestAll = () => records.latest;
 
 async function recordLatest(updates: Record<string, Partial<Latest>>) {
@@ -1030,9 +1079,9 @@ async function checkMissing() {
   log.error(`Locked file(s) disappeared: ${names}`);
   const inVault = missing.some((m) => m.lockedPath !== m.plainPath + LOCKED);
   const pick = await vscode.window.showErrorMessage(
-    `Env Lock: locked secret file(s) were deleted by something other than Env Lock: ${names}. ` +
+    `Env Safety: locked secret file(s) were deleted by something other than Env Safety: ${names}. ` +
       (inVault ? 'The vault may still hold the previous version (<name>.locked.prev). ' : '') +
-      'Restore from your backup ("Env Lock: Back up keys and vault").',
+      'Restore from your backup ("Env Safety: Back up keys and vault").',
     ...(inVault ? ['Show vault folder'] : [])
   );
   if (pick) await revealVaultCommand();
@@ -1070,7 +1119,7 @@ async function lockCommand(reason?: string, only?: vscode.Uri[]): Promise<boolea
     let k = await loadKeyring();
     if (!k) {
       const pick = await vscode.window.showWarningMessage(
-        'Env Lock: no post-quantum keys yet. Set them up once; after that locking never needs a passphrase.',
+        'Env Safety: no post-quantum keys yet. Set them up once; after that locking never needs a passphrase.',
         'Set up keys'
       );
       if (!pick || !(await setupKeysCommand())) return false;
@@ -1086,7 +1135,7 @@ async function lockCommand(reason?: string, only?: vscode.Uri[]): Promise<boolea
       plain = plain.filter((u) => !tracked.has(u.fsPath.toLowerCase()));
     }
     if (!plain.length) {
-      if (!reason) vscode.window.showInformationMessage('Env Lock: nothing to lock.');
+      if (!reason) vscode.window.showInformationMessage('Env Safety: nothing to lock.');
       void huntCopies();
       return true;
     }
@@ -1107,12 +1156,12 @@ async function lockCommand(reason?: string, only?: vscode.Uri[]): Promise<boolea
       return f && storageMode(f) === 'vault';
     });
     vscode.window.showInformationMessage(
-      `Env Lock: 🔒 locked ${plain.length} file(s) with ML-KEM-768 + X25519${inVault ? ' and moved them to the vault, outside the project' : ''}` +
+      `Env Safety: 🔒 locked ${plain.length} file(s) with ML-KEM-768 + X25519${inVault ? ' and moved them to the vault, outside the project' : ''}` +
         `${reason ? ` (${reason})` : ''}.`
     );
     return true;
   } catch (e: any) {
-    vscode.window.showErrorMessage(`Env Lock: ${e.message ?? e}`);
+    vscode.window.showErrorMessage(`Env Safety: ${e.message ?? e}`);
     return false;
   } finally {
     busy = false;
@@ -1130,27 +1179,27 @@ interface Decrypted {
 }
 
 /**
- * Keeps only files made by this machine's Env Lock, for this file, in their newest version.
- * Invalid signatures are refused (reported in `bad`). Unsigned files (older Env Lock, or planted
+ * Keeps only files made by this machine's Env Safety, for this file, in their newest version.
+ * Invalid signatures are refused (reported in `bad`). Unsigned files (older Env Safety, or planted
  * with your public key) and older versions (possible rollback) need explicit consent.
  */
 async function checkSignatures(entries: Decrypted[], bad: string[]): Promise<Decrypted[]> {
   if (recordsReset) {
-    // Files signed by an Env Lock older than 0.7.2 used a random key, lost with the wiped store: such a
+    // Files signed by an Env Safety older than 0.7.2 used a random key, lost with the wiped store: such a
     // signature can no longer be told from a forged one. Ask (like an unsigned file) instead of refusing
     // the user's own files forever. Files signed since 0.7.2 still verify (derived key).
     for (const e of entries) if (e.sign.state === 'invalid') e.sign = { state: 'unsigned', signedAt: 0 };
   }
   const invalid = entries.filter((e) => e.sign.state === 'invalid');
   bad.push(...invalid.map((e) => e.label));
-  if (invalid.length) log.error(`Refused, invalid signature (not made by your Env Lock, or renamed): ${invalid.map((e) => e.label).join(', ')}`);
+  if (invalid.length) log.error(`Refused, invalid signature (not made by your Env Safety, or renamed): ${invalid.map((e) => e.label).join(', ')}`);
   const newest = latestAll();
   const stale = entries.filter((e) => e.sign.state === 'valid' && e.sign.signedAt < (newest[e.bind]?.at ?? 0));
   const unsigned = entries.filter((e) => e.sign.state === 'unsigned');
   const ask = async (list: Decrypted[], why: string) => {
     if (!list.length) return false;
     const yes = !!(await vscode.window.showWarningMessage(
-      `Env Lock: ${list.map((e) => e.label).join(', ')}: ${why}`,
+      `Env Safety: ${list.map((e) => e.label).join(', ')}: ${why}`,
       { modal: true },
       'Use them'
     ));
@@ -1159,7 +1208,7 @@ async function checkSignatures(entries: Decrypted[], bad: string[]): Promise<Dec
   };
   const useUnsigned = await ask(
     unsigned,
-    'no signature. Locked by an older Env Lock, or created by someone else using your public key (e.g. to swap in a fake API URL). ' +
+    'no signature. Locked by an older Env Safety, or created by someone else using your public key (e.g. to swap in a fake API URL). ' +
       'Only use them if you locked them yourself. They are signed when locked again.'
   );
   const useStale = await ask(
@@ -1342,7 +1391,7 @@ async function committedSecrets(plain: vscode.Uri[], unstage: boolean): Promise<
     const names = stagedOnly.filter((u) => unstaged.has(u.fsPath.toLowerCase())).map(rel).join(', ');
     log.warn(`Unstaged (git rm --cached) secret files that were staged but never committed: ${names}`);
     void vscode.window.showWarningMessage(
-      `Env Lock: ${names} had been staged for commit (git add) but never committed. Env Lock unstaged it and locked it, ` +
+      `Env Safety: ${names} had been staged for commit (git add) but never committed. Env Safety unstaged it and locked it, ` +
         'so it cannot be committed. If you did not stage it, something (an AI agent?) did. Make sure .gitignore lists it; ' +
         'its staged copy stays in .git/objects until "git gc --prune=now".'
     );
@@ -1358,9 +1407,9 @@ function warnTracked(files: string[]) {
   const names = files.map((f) => vscode.workspace.asRelativePath(f)).join(', ');
   log.warn(`Not locked, tracked by git: ${names}`);
   void vscode.window.showWarningMessage(
-    `Env Lock: not locked because git tracks them: ${names}. Locking would delete them from git. ` +
+    `Env Safety: not locked because git tracks them: ${names}. Locking would delete them from git. ` +
       'They are already in your git history, so treat those secrets as exposed: rotate them, then run ' +
-      '"git rm --cached <file>" and add the file to .gitignore. Env Lock locks it from then on.'
+      '"git rm --cached <file>" and add the file to .gitignore. Env Safety locks it from then on.'
   );
 }
 
@@ -1374,7 +1423,7 @@ async function warnIfNotGitIgnored(targets: string[]) {
   }
   if (!missing.length) return;
   const pick = await vscode.window.showWarningMessage(
-    `Env Lock: not ignored by git, so it could be committed: ${missing.map((m) => m.rel).join(', ')}.`,
+    `Env Safety: not ignored by git, so it could be committed: ${missing.map((m) => m.rel).join(', ')}.`,
     'Add to .gitignore'
   );
   if (!pick) return;
@@ -1393,7 +1442,7 @@ async function confirmUnlockToDisk(count: number): Promise<boolean> {
   if (!secure<boolean>('confirmUnlockToDisk', true)) return true;
   const ai = installedAgentExtensions();
   const pick = await vscode.window.showWarningMessage(
-    `Env Lock: unlock ${count} file(s) to disk?\n\nWhile unlocked, AI agents can read them` +
+    `Env Safety: unlock ${count} file(s) to disk?\n\nWhile unlocked, AI agents can read them` +
       (ai.length ? `, including these installed AI extensions: ${ai.join(', ')}` : '') +
       `. To run your app, "Run a command with secrets" gives them to it in memory instead (nothing written to disk).`,
     { modal: true },
@@ -1410,14 +1459,14 @@ async function unlockCommand(only?: { locked: vscode.Uri[]; vault: VaultItem[] }
   try {
     const { locked, vault } = only ?? (await findSecretFiles());
     const total = locked.length + vault.length;
-    if (!total) return void vscode.window.showInformationMessage('Env Lock: nothing is locked.');
+    if (!total) return void vscode.window.showInformationMessage('Env Safety: nothing is locked.');
     if (!(await confirmUnlockToDisk(total))) return;
     const k = await loadKeyring();
-    if (!k) return void vscode.window.showErrorMessage(`Env Lock: keyring not found at ${keyringPath()}.`);
+    if (!k) return void vscode.window.showErrorMessage(`Env Safety: keyring not found at ${keyringPath()}.`);
     const opened = await unlockKeyring(k, `Passphrase to unlock ${total} file(s)`);
     if (!opened) return;
     // The passphrase proved this keyring is yours: pin it (first run, after an upgrade, or after
-    // Env Lock's credential store was wiped), with the signing key derived from it.
+    // Env Safety's credential store was wiped), with the signing key derived from it.
     if ((await readTrust())?.keyId !== k.keyId) await writeTrust(k.keyId, undefined, macKeyFromPrivate(opened.priv));
     cachedPub = publicKeys(k);
     const macKey = await signingKeys(opened.priv);
@@ -1479,21 +1528,21 @@ async function unlockCommand(only?: { locked: vscode.Uri[]; vault: VaultItem[] }
     if (viaLink.length) log.error(`Refused to unlock through a link leading outside the project: ${viaLink.join(', ')}`);
     const minutes = autoLockMinutes();
     vscode.window.showWarningMessage(
-      `Env Lock: 🔓 unlocked ${restored.length} file(s). AI agents CAN read them now.` +
+      `Env Safety: 🔓 unlocked ${restored.length} file(s). AI agents CAN read them now.` +
         (minutes > 0 ? ` Auto-lock in ${minutes} min.` : '') +
         (skipped.length ? ` Skipped (plaintext already exists): ${skipped.join(', ')}.` : '') +
         (foreign.length ? ` Locked with a different key: ${foreign.join(', ')}.` : '') +
         (refused.length
-          ? ` Kept in the vault (outside the project, or no longer a protected file type; add it to envLock.customPatterns to restore it): ${refused.join(', ')}.`
+          ? ` Kept in the vault (outside the project, or no longer a protected file type; add it to envSafety.customPatterns to restore it): ${refused.join(', ')}.`
           : '') +
-        (badSig.length ? ` ⚠ REFUSED, signature invalid (not made by your Env Lock; possibly planted): ${badSig.join(', ')}.` : '') +
+        (badSig.length ? ` ⚠ REFUSED, signature invalid (not made by your Env Safety; possibly planted): ${badSig.join(', ')}.` : '') +
         (viaLink.length
           ? ` ⚠ REFUSED, its folder is a link leading outside the project (the secret would be written elsewhere): ${viaLink.join(', ')}. Kept locked.`
           : '')
     );
     void warnIfNotGitIgnored(restored);
   } catch (e: any) {
-    vscode.window.showErrorMessage(`Env Lock: ${e.message ?? e}`);
+    vscode.window.showErrorMessage(`Env Safety: ${e.message ?? e}`);
   } finally {
     busy = false;
     await refreshStatus();
@@ -1515,14 +1564,14 @@ async function protectFileCommand(uri?: vscode.Uri) {
   uri = targetUri(uri);
   if (!uri || uri.scheme !== 'file') return;
   const folder = vscode.workspace.getWorkspaceFolder(uri);
-  if (!folder) return void vscode.window.showErrorMessage('Env Lock: the file must be inside the workspace.');
+  if (!folder) return void vscode.window.showErrorMessage('Env Safety: the file must be inside the workspace.');
   const r = path.relative(folder.uri.fsPath, uri.fsPath).replace(/\\/g, '/');
   const c = cfg(folder.uri);
   const mine = projectAllow()[folder.uri.fsPath] ?? [];
   if (!matchesAny(r, activePatterns()) || mine.includes(r)) {
     // Any extension can run this command: never encrypt and move a file without asking.
     const ok = await vscode.window.showWarningMessage(
-      `Env Lock: protect ${r}? It is encrypted now (moved out of the project in vault mode) and from then on.`,
+      `Env Safety: protect ${r}? It is encrypted now (moved out of the project in vault mode) and from then on.`,
       { modal: true },
       'Protect and lock'
     );
@@ -1541,14 +1590,14 @@ async function unprotectFileCommand(uri?: vscode.Uri) {
   uri = targetUri(uri);
   if (!uri || uri.scheme !== 'file') return;
   if (uri.fsPath.endsWith(LOCKED)) {
-    return void vscode.window.showWarningMessage('Env Lock: unlock this file first (right-click → Env Lock: Unlock this file).');
+    return void vscode.window.showWarningMessage('Env Safety: unlock this file first (right-click → Env Safety: Unlock this file).');
   }
   const folder = vscode.workspace.getWorkspaceFolder(uri);
   if (!folder) return;
   const r = path.relative(folder.uri.fsPath, uri.fsPath).replace(/\\/g, '/');
   // Weakens protection, and other extensions (AI ones too) can run commands: always confirm.
   const ok = await vscode.window.showWarningMessage(
-    `Env Lock: stop protecting ${r}? It will stay readable by AI agents.`,
+    `Env Safety: stop protecting ${r}? It will stay readable by AI agents.`,
     { modal: true },
     'Stop protecting'
   );
@@ -1564,7 +1613,7 @@ async function unprotectFileCommand(uri?: vscode.Uri) {
     await setProjectAllow(folder, [...new Set([...mine, r])]);
   }
   log.info(`Stopped protecting ${r} (${folder.name})`);
-  vscode.window.showInformationMessage(`Env Lock: ${r} is no longer protected.`);
+  vscode.window.showInformationMessage(`Env Safety: ${r} is no longer protected.`);
   await autoApplyRules();
   void refreshStatus();
 }
@@ -1582,8 +1631,8 @@ async function protectedUri(uri: vscode.Uri, kind: 'plain' | 'locked'): Promise<
   if (!hit) {
     log.warn(`Refused ${kind === 'plain' ? 'lock' : 'unlock'} of a file that is not a protected file of this workspace: ${uri.fsPath}`);
     void vscode.window.showWarningMessage(
-      `Env Lock: ${vscode.workspace.asRelativePath(uri)} is not a protected secret file of this workspace` +
-        (kind === 'plain' ? ' (right-click → "Env Lock: Protect this file" first).' : '.')
+      `Env Safety: ${vscode.workspace.asRelativePath(uri)} is not a protected secret file of this workspace` +
+        (kind === 'plain' ? ' (right-click → "Env Safety: Protect this file" first).' : '.')
     );
   }
   return hit;
@@ -1636,7 +1685,7 @@ async function choosePresetsCommand() {
   ];
   const picked = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder: 'Which kinds of secret files should be locked? (custom files: right-click → Env Lock: Protect this file)',
+    placeHolder: 'Which kinds of secret files should be locked? (custom files: right-click → Env Safety: Protect this file)',
   });
   if (!picked) return;
   // User settings: a project can only add presets, so choosing fewer must happen at user level.
@@ -1655,7 +1704,7 @@ async function showProtectedCommand() {
   if (vault.length) {
     items.push({ label: `$(archive) ${vault.length} file(s) in the vault`, description: 'names are encrypted; outside the project', vault: true });
   }
-  if (!items.length) return void vscode.window.showInformationMessage('Env Lock: no protected files found.');
+  if (!items.length) return void vscode.window.showInformationMessage('Env Safety: no protected files found.');
   const pick = await vscode.window.showQuickPick(items, { placeHolder: `Patterns: ${activePatterns().join(', ')}` });
   if (pick?.vault) await revealVaultCommand();
   else if (pick?.uri) await vscode.commands.executeCommand('revealInExplorer', pick.uri);
@@ -1667,17 +1716,17 @@ async function showProtectedCommand() {
  */
 async function backupCommand() {
   const picked = await vscode.window.showOpenDialog({
-    title: 'Back up Env Lock keys and vault to… (outside your projects, ideally removable or cloud storage)',
+    title: 'Back up Env Safety keys and vault to… (outside your projects, ideally removable or cloud storage)',
     canSelectFiles: false,
     canSelectFolders: true,
   });
   if (!picked?.length) return;
   const base = picked[0];
   if (vscode.workspace.getWorkspaceFolder(base)) {
-    return void vscode.window.showErrorMessage('Env Lock: choose a folder outside your projects; agents work inside them.');
+    return void vscode.window.showErrorMessage('Env Safety: choose a folder outside your projects; agents work inside them.');
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(base.fsPath, `env-lock-backup-${stamp}`);
+  const dest = path.join(base.fsPath, `env-safety-backup-${stamp}`);
   await fs.mkdir(dest, { recursive: true });
   const copied: string[] = [];
   for (const [src, name] of [
@@ -1694,7 +1743,7 @@ async function backupCommand() {
   log.info(`Backup written to ${dest}: ${copied.join(', ')}`);
   const k = await loadKeyring();
   const pick = await vscode.window.showInformationMessage(
-    `Env Lock: backed up ${copied.join(' and ') || 'nothing (no keys yet)'} to ${dest}. ` +
+    `Env Safety: backed up ${copied.join(' and ') || 'nothing (no keys yet)'} to ${dest}. ` +
       `Everything is encrypted; you still need your passphrase${k && keyringNeedsKeyFile(k) ? ' and key file' : ''} to restore.`,
     'Reveal'
   );
@@ -1707,7 +1756,7 @@ async function revealVaultCommand() {
   // A damaged vault (e.g. vault.json rewritten) still has a folder to show: the pinned one.
   const pinned = folder ? records.pins[folder.uri.fsPath] : undefined;
   const dir = v?.dir ?? (pinned ? path.join(vaultRoot(), pinned) : undefined);
-  if (!dir) return void vscode.window.showInformationMessage('Env Lock: this project has no vault yet. It is created on the first lock.');
+  if (!dir) return void vscode.window.showInformationMessage('Env Safety: this project has no vault yet. It is created on the first lock.');
   await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(v ? path.join(dir, 'vault.json') : dir));
 }
 
@@ -1718,7 +1767,7 @@ async function runWithSecretsCommand() {
   // terminal's environment: VS Code shows every terminal's creation options, env included, to
   // every installed extension.)
   const command = await vscode.window.showInputBox({
-    title: 'Env Lock: run with secrets',
+    title: 'Env Safety: run with secrets',
     prompt: 'Command to run with your secrets in its environment, e.g. npm run dev. Nothing is written to disk.',
     // From the protected records: an agent editing a pre-filled command could add "& curl attacker…".
     value: records.lastCommand ?? 'npm run dev',
@@ -1728,7 +1777,7 @@ async function runWithSecretsCommand() {
   const agent = agentIn(command);
   if (agent) {
     log.warn(`Refused to run an AI agent with secrets: ${command}`);
-    return void vscode.window.showErrorMessage(`Env Lock: "${agent}" is an AI agent; it will not be given your secrets.`);
+    return void vscode.window.showErrorMessage(`Env Safety: "${agent}" is an AI agent; it will not be given your secrets.`);
   }
   records.lastCommand = command;
   await saveRecords();
@@ -1739,7 +1788,7 @@ async function runWithSecretsCommand() {
   const getPriv = async () => {
     if (priv) return priv;
     const k = await loadKeyring();
-    if (!k) return void vscode.window.showErrorMessage(`Env Lock: keyring not found at ${keyringPath()}.`);
+    if (!k) return void vscode.window.showErrorMessage(`Env Safety: keyring not found at ${keyringPath()}.`);
     priv = (await unlockKeyring(k, 'Passphrase to load secrets into a terminal'))?.priv;
     // The passphrase proved this keyring is yours: pin it (first run / after an upgrade).
     if (priv && (await readTrust())?.keyId !== k.keyId) await writeTrust(k.keyId, undefined, macKeyFromPrivate(priv));
@@ -1768,7 +1817,7 @@ async function runWithSecretsCommand() {
       }
       decrypted.push(...(await readVault(vault, priv!, [], [])));
     } catch (e: any) {
-      return void vscode.window.showErrorMessage(`Env Lock: ${e.message ?? e}`);
+      return void vscode.window.showErrorMessage(`Env Safety: ${e.message ?? e}`);
     }
   }
   const trusted = await checkSignatures(
@@ -1776,7 +1825,7 @@ async function runWithSecretsCommand() {
     badSig
   );
   if (badSig.length) {
-    vscode.window.showErrorMessage(`Env Lock: ⚠ not loaded, signature invalid (possibly planted): ${badSig.join(', ')}.`);
+    vscode.window.showErrorMessage(`Env Safety: ⚠ not loaded, signature invalid (possibly planted): ${badSig.join(', ')}.`);
   }
 
   type Entry = { file: string; data?: Buffer };
@@ -1787,7 +1836,7 @@ async function runWithSecretsCommand() {
       .filter((e) => !plain.some((u) => u.fsPath.toLowerCase() === e.target.toLowerCase()))
       .map((e) => ({ file: e.target, data: e.data })),
   ];
-  if (!entries.length) return void vscode.window.showInformationMessage('Env Lock: no dotenv files found.');
+  if (!entries.length) return void vscode.window.showInformationMessage('Env Safety: no dotenv files found.');
 
   const dirs = [...new Set(entries.map((e) => path.dirname(e.file)))];
   let dir = dirs[0];
@@ -1816,7 +1865,7 @@ async function runWithSecretsCommand() {
     mode = pick.mode;
   }
   const chosen = dotenvPlan(names, mode).map((n) => inDir.find((e) => path.basename(e.file) === n)!);
-  if (!chosen.length) return void vscode.window.showInformationMessage('Env Lock: no dotenv files for that choice.');
+  if (!chosen.length) return void vscode.window.showInformationMessage('Env Safety: no dotenv files for that choice.');
 
   const files: ParsedEnv[] = [];
   try {
@@ -1825,7 +1874,7 @@ async function runWithSecretsCommand() {
       files.push({ file: e.file, vars: parseDotenv(buf.toString('utf8')) });
     }
   } catch (e: any) {
-    return void vscode.window.showErrorMessage(`Env Lock: ${e.message ?? e}`);
+    return void vscode.window.showErrorMessage(`Env Safety: ${e.message ?? e}`);
   } finally {
     for (const e of decrypted) e.data.fill(0); // best effort: only the terminal keeps the values
     wipePrivate(priv);
@@ -1839,7 +1888,7 @@ async function runWithSecretsCommand() {
 
 // ----------------------------------------------------------------- what "Run with secrets" trusts
 //
-// A signature shows Env Lock locked a file, not that YOU wrote it: an agent can write .env.local
+// A signature shows Env Safety locked a file, not that YOU wrote it: an agent can write .env.local
 // (plaintext, or auto-locked and signed later) with API_URL=https://attacker… while your real
 // API_KEY comes from the vault, or NODE_OPTIONS=--require ./x.js to run code inside your app.
 // So every value is compared with the values you approved on your last run.
@@ -1905,8 +1954,8 @@ async function reviewDotenvValues(files: ParsedEnv[]): Promise<Record<string, st
     const lines = [...byFile].map(([f, keys]) => `${f}: ${keys.join(', ')}`).join('\n');
     const pick = await vscode.window.showWarningMessage(
       (firstRun
-        ? 'Env Lock: first run with secrets. Check that you wrote these values:\n\n'
-        : 'Env Lock: these values are NEW or CHANGED since you last ran with secrets. An AI agent could have planted them, ' +
+        ? 'Env Safety: first run with secrets. Check that you wrote these values:\n\n'
+        : 'Env Safety: these values are NEW or CHANGED since you last ran with secrets. An AI agent could have planted them, ' +
           'e.g. a URL that sends your real keys elsewhere:\n\n') +
         lines +
         (control.length
@@ -1970,7 +2019,7 @@ async function reviewRunFiles(dir: string, command: string): Promise<boolean> {
   const changed = Object.keys(now).filter((n) => (before ? before[n] !== now[n] : RUN_EXECUTABLES.test(n)));
   if (changed.length) {
     const pick = await vscode.window.showWarningMessage(
-      `Env Lock: "${command}" will get your secrets, and these files that decide what it runs are ` +
+      `Env Safety: "${command}" will get your secrets, and these files that decide what it runs are ` +
         `${before ? 'new or changed since your last run' : 'in its folder'}:\n\n${changed.join('\n')}\n\n` +
         'An AI agent could have edited them to send your secrets elsewhere. Run only if you made these changes.',
       { modal: true },
@@ -1987,7 +2036,7 @@ async function reviewRunFiles(dir: string, command: string): Promise<boolean> {
 
 /**
  * Runs `command` with the secrets in ITS environment only, showing its output in a terminal that
- * Env Lock drives (a pseudoterminal). The terminal's creation options, which every extension can
+ * Env Safety drives (a pseudoterminal). The terminal's creation options, which every extension can
  * read, hold only this object: the secrets stay in a closure and are dropped after spawning.
  */
 function runWithSecretEnv(command: string, cwd: string, secretEnv: Record<string, string>) {
@@ -2014,7 +2063,7 @@ function runWithSecretEnv(command: string, cwd: string, secretEnv: Record<string
     onDidWrite: write.event,
     onDidClose: closed.event,
     open: () => {
-      out(`${ESC}[33m[env-lock] ${count} secret(s) given to this process only: ${command}${ESC}[0m\n`);
+      out(`${ESC}[33m[env-safety] ${count} secret(s) given to this process only: ${command}${ESC}[0m\n`);
       try {
         child = spawn(command, {
           cwd,
@@ -2030,10 +2079,10 @@ function runWithSecretEnv(command: string, cwd: string, secretEnv: Record<string
       }
       child.stdout?.on('data', (d) => out(d.toString()));
       child.stderr?.on('data', (d) => out(d.toString()));
-      child.on('error', (e) => out(`${ESC}[31m[env-lock] ${e.message}${ESC}[0m\n`));
+      child.on('error', (e) => out(`${ESC}[31m[env-safety] ${e.message}${ESC}[0m\n`));
       child.on('exit', (code) => {
         exited = true;
-        out(`\n${ESC}[33m[env-lock] exited (${code ?? 'killed'}). Press any key to close.${ESC}[0m\n`);
+        out(`\n${ESC}[33m[env-safety] exited (${code ?? 'killed'}). Press any key to close.${ESC}[0m\n`);
       });
     },
     close: stop,
@@ -2048,7 +2097,7 @@ function runWithSecretEnv(command: string, cwd: string, secretEnv: Record<string
     },
   };
   const term = vscode.window.createTerminal({
-    name: `env-lock: ${command}`,
+    name: `env-safety: ${command}`,
     pty,
     isTransient: true, // never restored after a reload
     iconPath: new vscode.ThemeIcon('key'),
@@ -2073,14 +2122,14 @@ async function applyRules(quiet: boolean) {
     try {
       changed.push(...(await applyAgentRules(folder.uri.fsPath, activePatterns(), allowList())));
     } catch (e: any) {
-      vscode.window.showWarningMessage(`Env Lock: ${e.message ?? e}`);
+      vscode.window.showWarningMessage(`Env Safety: ${e.message ?? e}`);
     }
   }
   if (!quiet || changed.length) {
     vscode.window.showInformationMessage(
       changed.length
-        ? `Env Lock: updated agent rules: ${changed.map((f) => vscode.workspace.asRelativePath(f)).join(', ')}.`
-        : 'Env Lock: agent rules already up to date.'
+        ? `Env Safety: updated agent rules: ${changed.map((f) => vscode.workspace.asRelativePath(f)).join(', ')}.`
+        : 'Env Safety: agent rules already up to date.'
     );
   }
 }
@@ -2139,9 +2188,9 @@ async function doRefreshStatus() {
   plain = plain.filter((u) => !tracked.has(u.fsPath.toLowerCase()));
   knownPlain = plain.map((u) => u.fsPath);
   lockOnClose = secure<boolean>('lockOnClose', true);
-  void vscode.commands.executeCommand('setContext', 'envLock.unlocked', plain.length > 0);
-  // Drives the lock button in the editor tab bar (`resourcePath in envLock.plainFiles`).
-  void vscode.commands.executeCommand('setContext', 'envLock.plainFiles', knownPlain);
+  void vscode.commands.executeCommand('setContext', 'envSafety.unlocked', plain.length > 0);
+  // Drives the lock button in the editor tab bar (`resourcePath in envSafety.plainFiles`).
+  void vscode.commands.executeCommand('setContext', 'envSafety.plainFiles', knownPlain);
   if (!plain.length) clearAutoLock();
   else ensureAutoLock();
   if (!plain.length && !locked.length && !vault.length) {
@@ -2180,16 +2229,16 @@ function rebuildWatcher(ctx: vscode.ExtensionContext) {
 }
 
 /**
- * Env Lock ITSELF replaced (same id, other version or files) or removed: the new code would get
- * Env Lock's credential store, including your anti-phishing phrase, so its passphrase prompt would
- * look real. Only the running (real) Env Lock can still warn.
+ * Env Safety ITSELF replaced (same id, other version or files) or removed: the new code would get
+ * Env Safety's credential store, including your anti-phishing phrase, so its passphrase prompt would
+ * look real. Only the running (real) Env Safety can still warn.
  */
 function selfReplaced(details: string) {
-  log.error(`Env Lock itself was replaced or removed: ${details}`);
-  closeSecretTerminals('Env Lock was replaced');
-  void onAgentDetected('Env Lock was replaced');
+  log.error(`Env Safety itself was replaced or removed: ${details}`);
+  closeSecretTerminals('Env Safety was replaced');
+  void onAgentDetected('Env Safety was replaced');
   void vscode.window.showErrorMessage(
-    'Env Lock: Env Lock ITSELF was updated, replaced or removed. If you did not do this, an impostor could ' +
+    'Env Safety: Env Safety ITSELF was updated, replaced or removed. If you did not do this, an impostor could ' +
       'show a perfect passphrase prompt (with your phrase) after the next reload: do NOT reload or type your ' +
       'passphrase. Check the installed version and run "npm run hash" (attack test 18) first.',
     { modal: true }
@@ -2201,10 +2250,23 @@ function selfReplaced(details: string) {
 export async function activate(ctx: vscode.ExtensionContext) {
   secrets = ctx.secrets;
   state = ctx.globalState;
-  log = vscode.window.createOutputChannel('Env Lock Security', { log: true });
+  log = vscode.window.createOutputChannel('Env Safety Security', { log: true });
   ctx.subscriptions.push(log);
+  // Env Lock -> Env Safety (0.8.0): copy ~/.env-lock and the envLock.* user settings once.
+  let migrated = false;
+  if (!(await secrets.get(TRUST_SECRET))) {
+    try {
+      migrated = (await migrateHome()) === 'migrated';
+    } catch (e) {
+      log.error(`Could not copy ~/${LEGACY_HOME_DIR}: ${(e as Error).message}`);
+    }
+  }
+  if (migrated) {
+    const moved = await migrateLegacySettings();
+    log.info(`Copied ~/${LEGACY_HOME_DIR} to the Env Safety folder; settings copied: ${moved.join(', ') || 'none'}`);
+  }
   // Records first: settings, pins and version history are read from them from here on.
-  await loadRecords();
+  await loadRecords(migrated);
   await reviewSettings('VS Code started (settings.json may have been edited while it was closed)');
   let knownExtensions = new Set(vscode.extensions.all.map((e) => e.id.toLowerCase()));
   const selfStamp = () => {
@@ -2242,32 +2304,32 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const periodic = setInterval(() => void refreshStatus(), 60_000);
   ctx.subscriptions.push({ dispose: () => clearInterval(periodic) });
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  statusItem.command = 'envLock.toggle';
+  statusItem.command = 'envSafety.toggle';
 
   const reg = (id: string, fn: (...a: any[]) => unknown) => vscode.commands.registerCommand(id, fn);
   ctx.subscriptions.push(
     statusItem,
-    reg('envLock.setupKeys', setupKeysCommand),
-    reg('envLock.changePassphrase', changePassphraseCommand),
-    reg('envLock.lock', () => lockCommand()),
-    reg('envLock.unlock', () => unlockCommand()),
-    reg('envLock.toggle', toggleCommand),
-    reg('envLock.runWithSecrets', runWithSecretsCommand),
-    reg('envLock.applyAgentRules', () => applyRules(false)),
-    reg('envLock.choosePresets', choosePresetsCommand),
-    reg('envLock.showProtected', showProtectedCommand),
-    reg('envLock.protectFile', protectFileCommand),
-    reg('envLock.unprotectFile', unprotectFileCommand),
-    reg('envLock.unlockFile', unlockFileCommand),
-    reg('envLock.lockFile', lockFileCommand),
-    reg('envLock.revealVault', revealVaultCommand),
-    reg('envLock.setPhrase', setPhraseCommand),
-    reg('envLock.backup', backupCommand),
-    reg('envLock.showLog', () => log.show()),
+    reg('envSafety.setupKeys', setupKeysCommand),
+    reg('envSafety.changePassphrase', changePassphraseCommand),
+    reg('envSafety.lock', () => lockCommand()),
+    reg('envSafety.unlock', () => unlockCommand()),
+    reg('envSafety.toggle', toggleCommand),
+    reg('envSafety.runWithSecrets', runWithSecretsCommand),
+    reg('envSafety.applyAgentRules', () => applyRules(false)),
+    reg('envSafety.choosePresets', choosePresetsCommand),
+    reg('envSafety.showProtected', showProtectedCommand),
+    reg('envSafety.protectFile', protectFileCommand),
+    reg('envSafety.unprotectFile', unprotectFileCommand),
+    reg('envSafety.unlockFile', unlockFileCommand),
+    reg('envSafety.lockFile', lockFileCommand),
+    reg('envSafety.revealVault', revealVaultCommand),
+    reg('envSafety.setPhrase', setPhraseCommand),
+    reg('envSafety.backup', backupCommand),
+    reg('envSafety.showLog', () => log.show()),
     vscode.window.onDidCloseTerminal((t) => secretTerminals.delete(t)),
-    reg('envLock.revealKeyring', () => vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(keyringPath()))),
+    reg('envSafety.revealKeyring', () => vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(keyringPath()))),
     vscode.workspace.onDidChangeConfiguration(async (e) => {
-      if (!e.affectsConfiguration('envLock')) return;
+      if (!e.affectsConfiguration('envSafety')) return;
       await reviewSettings('settings changed');
       await auditProjectSettings();
       rebuildWatcher(ctx);
@@ -2291,23 +2353,23 @@ export async function activate(ctx: vscode.ExtensionContext) {
         e.terminal.dispose();
         log.warn(`Closed the secrets terminal: "${a}" was started in it`);
         vscode.window.showErrorMessage(
-          `Env Lock: closed the secrets terminal because "${a}" was started in it. Agents would inherit every secret in its environment.`
+          `Env Safety: closed the secrets terminal because "${a}" was started in it. Agents would inherit every secret in its environment.`
         );
       }
       void onAgentDetected(a);
     }),
     vscode.extensions.onDidChange(() => {
-      // Env Lock ITSELF replaced (same id, other version or folder): the new code would get Env Lock's
+      // Env Safety ITSELF replaced (same id, other version or folder): the new code would get Env Safety's
       // credential store, including your anti-phishing phrase, so its passphrase prompt would look real.
       // An agent can do it with `code --install-extension fake.vsix --force`. The running (real)
-      // Env Lock is the only one that can still warn.
+      // Env Safety is the only one that can still warn.
       const now = selfStamp();
       if (now !== selfAtStart && !replacedWarned) {
         replacedWarned = true;
         selfReplaced(`${selfAtStart} → ${now}`);
       }
       void checkReplaced();
-      // ANY new extension runs in the same process as Env Lock and could read what it decrypts.
+      // ANY new extension runs in the same process as Env Safety and could read what it decrypts.
       // An agent can install one with a single shell command (code --install-extension).
       const added = vscode.extensions.all.filter((e) => !knownExtensions.has(e.id.toLowerCase()));
       knownExtensions = new Set(vscode.extensions.all.map((e) => e.id.toLowerCase()));
@@ -2317,7 +2379,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       closeSecretTerminals(`extension installed: ${names}`);
       void onAgentDetected(`extension installed: ${names}`);
       void vscode.window.showWarningMessage(
-        `Env Lock: new extension(s) installed: ${names}. Extensions share VS Code's process with Env Lock, ` +
+        `Env Safety: new extension(s) installed: ${names}. Extensions share VS Code's process with Env Safety, ` +
           'so secrets were re-locked and secret processes stopped. If you did not install it, uninstall it now.',
         'Show extensions'
       ).then((pick) => pick && vscode.commands.executeCommand('workbench.extensions.action.showInstalledExtensions'));
@@ -2343,7 +2405,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       await lockCommand('workspace opened');
     } else if (!k) {
       const pick = await vscode.window.showWarningMessage(
-        `Env Lock: ${knownPlain.length} secret file(s) are readable by AI agents. Set up post-quantum keys to lock them.`,
+        `Env Safety: ${knownPlain.length} secret file(s) are readable by AI agents. Set up post-quantum keys to lock them.`,
         'Set up keys'
       );
       if (pick && (await setupKeysCommand())) await lockCommand();

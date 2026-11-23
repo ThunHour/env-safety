@@ -19,8 +19,10 @@ export const IGNORE_FILES = [
   '.aiderignore', // Aider
 ];
 
-const BEGIN = '# >>> env-lock (managed, do not edit) >>>';
-const END = '# <<< env-lock <<<';
+const BEGIN = '# >>> env-safety (managed, do not edit) >>>';
+const END = '# <<< env-safety <<<';
+// Written by Env Lock (the name before 0.8.0): replaced, never duplicated.
+const LEGACY = ['# >>> env-lock (managed, do not edit) >>>', '# <<< env-lock <<<'] as const;
 
 export const HOOK_REL_PATH = '.claude/hooks/env-guard.js';
 export const HOOK_CONFIG_REL_PATH = '.claude/hooks/env-guard.json';
@@ -30,7 +32,7 @@ const HOOK_MATCHER = 'Read|Edit|MultiEdit|Write|NotebookEdit|Bash|PowerShell|Gre
 /** Claude Code PreToolUse hook. Exit code 2 blocks the tool call and shows stderr to the model. */
 export function guardScript(): string {
   return `#!/usr/bin/env node
-// Managed by the env-lock VS Code extension. Patterns live in env-guard.json next to this file.
+// Managed by the env-safety VS Code extension. Patterns live in env-guard.json next to this file.
 // Claude Code PreToolUse hook: blocks tool calls that reference protected secret files.
 const fs = require('fs');
 const path = require('path');
@@ -79,7 +81,7 @@ process.stdin.on('end', () => {
   const hit = args.find((a) => a && isSecret(a));
   if (hit) {
     process.stderr.write(
-      'Blocked by env-lock: ' + (input.tool_name || 'tool') + ' references a protected secret file (' + norm(hit) + '). ' +
+      'Blocked by env-safety: ' + (input.tool_name || 'tool') + ' references a protected secret file (' + norm(hit) + '). ' +
       'Secrets are off-limits to AI agents. Use an example/template file or ask the user for non-secret values.\\n'
     );
     process.exit(2);
@@ -116,9 +118,11 @@ function ignoreLines(patterns: string[], allow: string[]): string[] {
 
 function upsertBlock(existing: string, lines: string[]): string {
   const block = [BEGIN, ...lines, END].join('\n');
-  const start = existing.indexOf(BEGIN);
-  const end = existing.indexOf(END);
-  if (start >= 0 && end > start) return existing.slice(0, start) + block + existing.slice(end + END.length);
+  for (const [b, e] of [[BEGIN, END], LEGACY]) {
+    const start = existing.indexOf(b);
+    const end = existing.indexOf(e);
+    if (start >= 0 && end > start) return existing.slice(0, start) + block + existing.slice(end + e.length);
+  }
   if (!existing) return block + '\n';
   return existing + (existing.endsWith('\n') ? '\n' : '\n\n') + block + '\n';
 }

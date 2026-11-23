@@ -1,11 +1,11 @@
 /**
  * Finding COPIES of a secret after it was locked (red-team X2, X7).
  *
- * While a secret is unlocked, an agent can copy it somewhere Env Lock does not lock: rename `.env`
+ * While a secret is unlocked, an agent can copy it somewhere Env Safety does not lock: rename `.env`
  * to `.env.example` (allow-listed), hard-link it to `notes.txt`, paste a key into `config.js`.
  * Locking then removes `.env`, but the copy stays readable for every later agent session.
  *
- * At lock time Env Lock remembers a KEYED hash (HMAC with your signing key) of each secret value
+ * At lock time Env Safety remembers a KEYED hash (HMAC with your signing key) of each secret value
  * and of each whole secret file, plus the lengths of those values. Later it hashes only the tokens
  * of matching length in other files and compares. The records never hold a plain hash of a secret
  * (a short password's plain SHA-256 could be guessed), and nothing here needs the passphrase.
