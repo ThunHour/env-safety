@@ -1,0 +1,477 @@
+{
+  "name": "env-lock",
+  "displayName": "Env Lock — post-quantum secret lock for AI agents",
+  "description": "Encrypts .env and other secret files (any language) with ML-KEM-768 + X25519 while AI coding agents work, and writes deny rules for Claude Code, Cursor, Cline, Gemini and others.",
+  "version": "0.7.5",
+  "publisher": "local",
+  "author": "Seak Kimhour",
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "env",
+    "dotenv",
+    "secrets",
+    "ai",
+    "security",
+    "post-quantum",
+    "ml-kem"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "envLock.setupKeys",
+        "title": "Set up post-quantum keys",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.changePassphrase",
+        "title": "Change passphrase / key file",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.revealKeyring",
+        "title": "Reveal keyring (for backup)",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.lock",
+        "title": "Lock all secret files",
+        "category": "Env Lock",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "envLock.unlock",
+        "title": "Unlock all secret files",
+        "category": "Env Lock",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "envLock.toggle",
+        "title": "Toggle lock",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.runWithSecrets",
+        "title": "Run a command with secrets (in memory)",
+        "category": "Env Lock",
+        "icon": "$(key)"
+      },
+      {
+        "command": "envLock.choosePresets",
+        "title": "Choose secret file types (languages)",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.showProtected",
+        "title": "Show protected files",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.applyAgentRules",
+        "title": "Write AI agent deny rules",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.protectFile",
+        "title": "Env Lock: Protect this file",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.unprotectFile",
+        "title": "Env Lock: Stop protecting this file",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.unlockFile",
+        "title": "Env Lock: Unlock this file",
+        "category": "Env Lock",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "envLock.lockFile",
+        "title": "Env Lock: Lock this file",
+        "category": "Env Lock",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "envLock.revealVault",
+        "title": "Reveal this project's vault folder",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.setPhrase",
+        "title": "Set anti-phishing phrase",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.backup",
+        "title": "Back up keys and vault",
+        "category": "Env Lock"
+      },
+      {
+        "command": "envLock.showLog",
+        "title": "Show security log",
+        "category": "Env Lock"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "envLock.protectFile",
+          "when": "!explorerResourceIsFolder && resourceExtname != .locked",
+          "group": "7_envlock@1"
+        },
+        {
+          "command": "envLock.unprotectFile",
+          "when": "!explorerResourceIsFolder && resourceExtname != .locked",
+          "group": "7_envlock@2"
+        },
+        {
+          "command": "envLock.unlockFile",
+          "when": "!explorerResourceIsFolder && resourceExtname == .locked",
+          "group": "7_envlock@1"
+        },
+        {
+          "command": "envLock.lockFile",
+          "when": "!explorerResourceIsFolder && resourcePath in envLock.plainFiles",
+          "group": "7_envlock@0"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "envLock.lockFile",
+          "when": "resourceScheme == file && resourcePath in envLock.plainFiles",
+          "group": "navigation@-100"
+        },
+        {
+          "command": "envLock.unlockFile",
+          "when": "resourceScheme == file && resourceExtname == .locked",
+          "group": "navigation@-100"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "envLock.lockFile",
+          "when": "resourceScheme == file && resourcePath in envLock.plainFiles",
+          "group": "7_envlock@0"
+        },
+        {
+          "command": "envLock.unlockFile",
+          "when": "resourceScheme == file && resourceExtname == .locked",
+          "group": "7_envlock@0"
+        },
+        {
+          "command": "envLock.protectFile",
+          "when": "resourceScheme == file && resourceExtname != .locked",
+          "group": "7_envlock@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "envLock.unlockFile",
+          "when": "resourceExtname == .locked"
+        },
+        {
+          "command": "envLock.lockFile",
+          "when": "resourcePath in envLock.plainFiles"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Env Lock",
+      "properties": {
+        "envLock.presets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "dotenv",
+              "cloud",
+              "node",
+              "python",
+              "ruby",
+              "php",
+              "java",
+              "dotnet",
+              "android",
+              "ios",
+              "flutter",
+              "go",
+              "elixir",
+              "rust",
+              "terraform",
+              "containers",
+              "keys"
+            ]
+          },
+          "default": [
+            "auto"
+          ],
+          "markdownDescription": "Kinds of secret files to lock. `auto` = dotenv + cloud credentials + every language detected in the workspace (package.json → node, pom.xml → java, pubspec.yaml → flutter…). Run **Env Lock: Choose secret file types** to pick visually. A project may add presets in its own settings, never remove them."
+        },
+        "envLock.customPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra globs to lock, e.g. `config/secrets.yml` or `**/*.secret.json`. Right-click a file → **Env Lock: Protect this file** adds it here. A project may add patterns, never remove them.",
+          "scope": "resource"
+        },
+        "envLock.allowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/.env.example",
+            "**/.env.sample",
+            "**/.env.template",
+            "**/.env.dist",
+            "**/*.example",
+            "**/*.sample",
+            "**/*.template"
+          ],
+          "description": "Globs that are never locked (templates with no real secrets). User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.exclude": {
+          "type": "string",
+          "default": "**/{node_modules,.git,vendor,.venv,venv,Pods}/**",
+          "description": "Folders to skip when searching (third-party code). Build output folders (build, dist, out, target, .next) are scanned last, with their own limit, because a build can copy a secret into them. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.storage": {
+          "type": "string",
+          "enum": [
+            "vault",
+            "inPlace"
+          ],
+          "enumDescriptions": [
+            "Move locked files out of the project into an encrypted vault (like .NET User Secrets, but encrypted). Agents working in the project see nothing.",
+            "Keep locked files next to the original as <file>.locked."
+          ],
+          "default": "vault",
+          "scope": "application",
+          "markdownDescription": "Where locked secret files are kept. Files already locked in place still unlock in either mode. User settings only: a project (and any AI agent working in it) cannot change it."
+        },
+        "envLock.vaultPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Folder holding every project's vault. Empty = `~/.env-lock/vault`. Keep it outside your projects and **back it up** with your keyring."
+        },
+        "envLock.vaultId": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "This project's vault id, like .NET's `UserSecretsId`. Set automatically on the first lock; safe to commit (it is not a secret). Locked files are in `<vaultPath>/<vaultId>/`. Pinned on first use: if a project changes it, Env Lock warns and keeps using the pinned vault."
+        },
+        "envLock.keyringPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Where your post-quantum keyring lives. Empty = `~/.env-lock/keyring.json`. Its private key is passphrase-encrypted. **Back it up.**"
+        },
+        "envLock.keyFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Optional key file (second factor) protecting the private key. Keep it outside your projects, ideally on removable media."
+        },
+        "envLock.autoLockMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "Re-lock automatically this many minutes after secrets become readable. 0 disables. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.confirmUnlockToDisk": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask before unlocking secrets to disk (where AI agents can read them), listing installed AI extensions and offering **Open terminal with secrets** (in memory) instead. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.agentExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "anthropic.claude-code",
+            "github.copilot",
+            "github.copilot-chat",
+            "saoudrizwan.claude-dev",
+            "rooveterinaryinc.roo-cline",
+            "kilocode.kilo-code",
+            "continue.continue",
+            "codeium.codeium",
+            "google.geminicodeassist",
+            "amazonwebservices.amazon-q-vscode",
+            "sourcegraph.cody-ai",
+            "tabnine.tabnine-vscode",
+            "openai.chatgpt"
+          ],
+          "description": "IDs of AI extensions. They run inside VS Code where terminal detection cannot see them: unlocking warns about them, and installing one re-locks your secrets. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.lockOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lock readable secret files as soon as the workspace opens. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.lockWhenAgentStarts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lock immediately when an AI agent CLI starts in a VS Code terminal. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.agentCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "claude",
+            "claude-code",
+            "codex",
+            "gemini",
+            "aider",
+            "cline",
+            "opencode",
+            "cursor-agent",
+            "copilot"
+          ],
+          "description": "Terminal commands / terminal names treated as AI agents. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        },
+        "envLock.autoApplyAgentRules": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Write deny/ignore rule files for AI agents (`.cursorignore`, `.clineignore`, `.geminiignore`, `.codeiumignore`, `.aiderignore`, `.claude/settings.json` + hook) into the project folder every time you lock. Off by default: locked files are already encrypted. Run **Env Lock: Write AI agent deny rules** to write them once by hand."
+        },
+        "envLock.lockOnClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-lock readable secret files when the VS Code window closes. User settings only: a project (and any AI agent working in it) cannot change it.",
+          "scope": "application"
+        }
+      }
+    },
+    "configurationDefaults": {
+      "workbench.localHistory.exclude": {
+        "**/.env*": true,
+        "**/.env": true,
+        "**/.env.*": true,
+        "**/*.env": true,
+        "**/.envrc": true,
+        "**/credentials.json": true,
+        "**/service-account*.json": true,
+        "**/serviceAccountKey*.json": true,
+        "**/*-credentials.json": true,
+        "**/.aws/credentials": true,
+        "**/.npmrc": true,
+        "**/.yarnrc.yml": true,
+        "**/.runtimeconfig.json": true,
+        "**/.pypirc": true,
+        "**/.streamlit/secrets.toml": true,
+        "**/local_settings.py": true,
+        "**/settings/local.py": true,
+        "**/instance/config.py": true,
+        "**/instance/*.cfg": true,
+        "**/.secrets.toml": true,
+        "**/config/master.key": true,
+        "**/config/credentials/*.key": true,
+        "**/auth.json": true,
+        "**/wp-config.php": true,
+        "**/storage/oauth-private.key": true,
+        "**/config/secrets/*/*.decrypt.private.php": true,
+        "**/application-local.properties": true,
+        "**/application-local.yml": true,
+        "**/application-local.yaml": true,
+        "**/application-secret*.properties": true,
+        "**/application-secret*.yml": true,
+        "**/application-secret*.yaml": true,
+        "**/appsettings.Development.json": true,
+        "**/appsettings.Local.json": true,
+        "**/secrets.json": true,
+        "**/*.pfx": true,
+        "**/*.pubxml.user": true,
+        "**/*.PublishSettings": true,
+        "**/*.publishsettings": true,
+        "**/local.properties": true,
+        "**/keystore.properties": true,
+        "**/key.properties": true,
+        "**/*.jks": true,
+        "**/*.keystore": true,
+        "**/google-services.json": true,
+        "**/GoogleService-Info.plist": true,
+        "**/*.p12": true,
+        "**/*.mobileprovision": true,
+        "**/AuthKey_*.p8": true,
+        "**/.netrc": true,
+        "**/config.local.yaml": true,
+        "**/config.local.yml": true,
+        "**/config.local.json": true,
+        "**/config.local.toml": true,
+        "**/config/*.secret.exs": true,
+        "**/.cargo/credentials": true,
+        "**/.cargo/credentials.toml": true,
+        "**/*.tfvars": true,
+        "**/*.tfvars.json": true,
+        "**/terraform.tfstate": true,
+        "**/terraform.tfstate.backup": true,
+        "**/.terraformrc": true,
+        "**/.docker/config.json": true,
+        "**/kubeconfig": true,
+        "**/*.kubeconfig": true,
+        "**/secret*.yaml": true,
+        "**/secret*.yml": true,
+        "**/*.pem": true,
+        "**/*.key": true,
+        "**/id_rsa": true,
+        "**/id_ecdsa": true,
+        "**/id_ed25519": true,
+        "**/*.locked": true
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "vscode:prepublish": "npm run build",
+    "test": "npm run compile && npm run build && node --test test/*.test.js",
+    "audit": "npm audit --omit=dev && npm audit signatures",
+    "hash": "node -e \"const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync('dist/extension.js')).digest('hex'),'dist/extension.js')\"",
+    "attack": "npm run -s compile && node scripts/attack-sim.js",
+    "redteam": "node scripts/redteam-vscode.js"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "@noble/post-quantum": "0.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

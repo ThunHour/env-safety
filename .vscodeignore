@@ -1,0 +1,16 @@
+src/**
+test/**
+out/**
+node_modules/**
+.vscode/**
+tsconfig.json
+**/*.map
+**/*.locked
+**/.env*
+*.vsix
+scripts/**
+docs/**
+.attack-test/**
+.redteam/**
+*.log
+images/*.svg

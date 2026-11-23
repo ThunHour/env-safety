@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extensions"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "skipFiles": ["<node_internals>/**", "**/resources/app/**", "**/.vscode/extensions/**"],
+      "preLaunchTask": "npm: build"
+    },
+    {
+      // docs/attack-tests.md: own settings, credential storage, extensions and keyring under
+      // .attack-test/, so attacks never touch your real VS Code or ~/.env-lock.
+      // Run `npm run attack setup` once before the first launch.
+      "name": "Env Lock: attack tests (isolated)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--user-data-dir=${workspaceFolder}/.attack-test/user-data",
+        "--extensions-dir=${workspaceFolder}/.attack-test/extensions",
+        "${workspaceFolder}/.attack-test/project"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "skipFiles": ["<node_internals>/**", "**/resources/app/**"],
+      "preLaunchTask": "npm: build"
+    }
+  ]
+}
