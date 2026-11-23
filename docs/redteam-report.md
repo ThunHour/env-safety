@@ -1,16 +1,16 @@
 # Env Safety red-team report
 
-**Version tested:** 0.7.5 (fixes from every round included) · **Date:** 2026-11-23 · **Tester:** Claude (automated red team)
+**Version tested:** 0.8.0 (fixes from every round included) · **Date:** 2026-11-23 · **Tester:** automated red team
 **Environment:** Windows 11, VS Code 1.147, Node 22 · **Raw results:** [redteam-results.md](redteam-results.md) (generated)
 
 ## 1. Summary
 
 Every attack in this report was **run against a real, isolated VS Code**, not only reasoned about, with a scripted user
-answering Env Safety's dialogs. 48 attacks run in four VS Code sessions, between which the attacker
-also acts while VS Code is closed. They are backed by 43 unit tests and
+answering Env Safety's dialogs. 51 attacks run in five VS Code sessions, between which the attacker
+also acts while VS Code is closed. They are backed by 46 unit tests and
 by fuzzing (random patterns, damaged locked files and keyrings, bit flips).
 
-**Result of the latest run (0.7.5): 48 of 48 attacks defended, 0 failed, 0 errors** (plus 43/43 unit tests).
+**Result of the latest run (0.8.0): 51 of 51 attacks defended, 0 failed, 0 errors** (plus 46/46 unit tests). 0.8.0 renamed Env Lock to Env Safety; attacks M1–M3 check the move of an existing Env Lock setup.
 Round 5 (attacks X1–X8, [§6](#6-round-5-keeping-secrets-readable-after-a-lock-075)) found five more problems, all fixed in 0.7.5.
 
 For round 4 (0.7.4, 40 attacks) it took four runs: the first three each failed on real problems, listed below, which were fixed before the next run.
@@ -227,13 +227,15 @@ failed for unmatched files in single-folder workspaces. Fixed (`resource` scope)
 | 7 | 0.7.5-dev | X8 1 of 2 checks | copy found, but *Protect and lock* failed: `customPatterns` scope bug (fixed) |
 | 8 | 0.7.5 | 47 of 48 | everything passes except T18: the old 0.7.4 package no longer matched the build (repackaged) |
 | 9 | 0.7.5 | **48 of 48** | all attacks defended, run again after installing the 0.7.5 package |
+| 10 | 0.8.0 | 49 of 51 | rename + migration (M1–M3): M3 found the project vault id written only at the next lock; T09 found that one transient "vaultId removed" read silenced the warning for a later real redirect (both fixed) |
+| 11 | 0.8.0 | **51 of 51** | all defended |
 
 ## 9. Reproduce
 
 ```
 npm install
-npm test            # 43 unit tests
-npm run redteam     # 48 attacks in an isolated VS Code (~4 min); a window opens: do not click in it
+npm test            # 46 unit tests
+npm run redteam     # 51 attacks in an isolated VS Code (~4 min); a window opens: do not click in it
 node scripts/redteam-vscode.js --only=X1,X8   # selected attacks only
 ```
 

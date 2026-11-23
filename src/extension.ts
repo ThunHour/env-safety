@@ -357,11 +357,29 @@ function vaultRoot(): string {
   return p ? expandHome(p) : defaultVaultRoot();
 }
 
-/** envLock.vaultId from the folder's .vscode/settings.json (written by Env Lock before the rename). */
-async function legacyVaultId(folder: vscode.WorkspaceFolder): Promise<string | undefined> {
+/** A vault id key read straight from the folder's .vscode/settings.json. */
+async function vaultIdInFile(folder: vscode.WorkspaceFolder, section: string): Promise<string | undefined> {
   const text = await fs.readFile(path.join(folder.uri.fsPath, '.vscode', 'settings.json'), 'utf8').catch(() => '');
-  const v = parseJsonc(text)?.[`${LEGACY_SECTION}.vaultId`];
+  const v = parseJsonc(text)?.[`${section}.vaultId`];
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+/** envLock.vaultId (written by Env Lock before the rename). */
+const legacyVaultId = (folder: vscode.WorkspaceFolder) => vaultIdInFile(folder, LEGACY_SECTION);
+const projectVaultIdOnDisk = (folder: vscode.WorkspaceFolder) => vaultIdInFile(folder, 'envSafety');
+
+/** Writes envSafety.vaultId for projects that only have Env Lock's envLock.vaultId (once, at startup). */
+async function migrateProjectVaultIds() {
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    if (folder.uri.scheme !== 'file' || cfg(folder.uri).get<string>('vaultId', '').trim()) continue;
+    const id = await legacyVaultId(folder);
+    if (!id || !isValidVaultId(id)) continue;
+    try {
+      await cfg(folder.uri).update('vaultId', id, vscode.ConfigurationTarget.WorkspaceFolder);
+      log.info(`${folder.name}: envLock.vaultId copied to envSafety.vaultId (${id})`);
+    } catch (e) {
+      log.warn(`${folder.name}: could not copy envLock.vaultId: ${(e as Error).message}`);
+    }
+  }
 }
 
 /**
@@ -402,9 +420,15 @@ async function folderVault(folder: vscode.WorkspaceFolder, create: boolean): Pro
   // vault, or a fresh one). The first id seen for this folder is pinned in the protected records.
   const pins = records.pins;
   const pinned = pins[folder.uri.fsPath];
+  if (pinned && !id && (await projectVaultIdOnDisk(folder)) === pinned) {
+    // Read while settings.json was being rewritten (VS Code saw it empty): the file still has the pinned id.
+    id = pinned;
+  }
   if (pinned && id !== pinned) {
-    if (!vaultIdWarned.has(folder.uri.fsPath)) {
-      vaultIdWarned.add(folder.uri.fsPath);
+    // Once per id seen: a first, harmless-looking change must not silence the warning for a later one.
+    const warnKey = `${folder.uri.fsPath}\0${id}`;
+    if (!vaultIdWarned.has(warnKey)) {
+      vaultIdWarned.add(warnKey);
       log.warn(`vaultId of ${folder.name} changed in .vscode/settings.json: "${id}" (pinned: "${pinned}")`);
       void vscode.window
         .showWarningMessage(
@@ -2267,6 +2291,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   }
   // Records first: settings, pins and version history are read from them from here on.
   await loadRecords(migrated);
+  await migrateProjectVaultIds();
   await reviewSettings('VS Code started (settings.json may have been edited while it was closed)');
   let knownExtensions = new Set(vscode.extensions.all.map((e) => e.id.toLowerCase()));
   const selfStamp = () => {

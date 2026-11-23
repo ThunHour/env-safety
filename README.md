@@ -219,8 +219,8 @@ What Env Safety **cannot** stop, and what to do instead:
 
 ```powershell
 npm install
-npm test          # tsc + esbuild bundle + 43 unit tests (PQC crypto, signing, vault, policy, patterns, scan, copies, agent rules, hook)
-npm run redteam   # 48 attacks run unattended in an isolated VS Code (~4 min) -> docs/redteam-results.md
+npm test          # tsc + esbuild bundle + 46 unit tests (PQC crypto, signing, vault, policy, patterns, scan, copies, migration, agent rules, hook)
+npm run redteam   # 51 attacks run unattended in an isolated VS Code (~4 min) -> docs/redteam-results.md
 node scripts/redteam-vscode.js --only=X1,X8   # selected attacks only
 npm run audit     # known vulnerabilities + registry signatures of dependencies
 npm run hash      # SHA-256 of dist/extension.js, to verify an installed copy

@@ -33,5 +33,5 @@ and changing Env Safety's installed code.
 ## How Env Safety is tested
 
 - `npm test`: unit tests (crypto, signing, vault, policy, patterns, scan, copy detection, agent rules, hook).
-- `npm run redteam`: 48 attacks run unattended against a real, isolated VS Code; results in
+- `npm run redteam`: 51 attacks run unattended against a real, isolated VS Code; results in
   [docs/redteam-results.md](docs/redteam-results.md), analysis in [docs/redteam-report.md](docs/redteam-report.md).

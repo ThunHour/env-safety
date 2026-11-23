@@ -16,6 +16,11 @@ All notable changes to Env Lock. Security fixes reference the attack IDs in
 - Agent rule blocks written by Env Lock in `.cursorignore` etc. are replaced, not duplicated.
 - Uninstall Env Lock after installing Env Safety.
 
+### Security
+- A change of the project's vault id is reported for every new id, not once per session: a first,
+  harmless-looking change (or a settings file read mid-write) no longer silences the warning for a later
+  redirect. The redirect itself was always refused.
+
 ## 0.7.5 — 2026-11-23
 
 Red-team round 5: attacks an agent can make **while secrets are unlocked** to keep them readable afterwards.
