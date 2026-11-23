@@ -9,12 +9,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ThunHour/env-lock.git"
+    "url": "https://github.com/ThunHour/env-safety.git"
   },
   "bugs": {
-    "url": "https://github.com/ThunHour/env-lock/issues"
+    "url": "https://github.com/ThunHour/env-safety/issues"
   },
-  "homepage": "https://github.com/ThunHour/env-lock#readme",
+  "homepage": "https://github.com/ThunHour/env-safety#readme",
   "engines": {
     "vscode": "^1.93.0"
   },
