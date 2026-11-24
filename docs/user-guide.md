@@ -143,7 +143,10 @@ A project can **add** protected files and types in its `.vscode/settings.json`, 
 - **`vault`** (default): locked files move **out of the project** to `~/.env-safety/vault/<vaultId>/`. Blob names
   are hashes; even the file names are encrypted. The project only stores `envSafety.vaultId` in
   `.vscode/settings.json` (safe to commit). *Env Safety: Reveal this project's vault folder* opens it.
-- **`inPlace`**: `secret` becomes `secret.locked` next to the original.
+- **`inPlace`**: `secret` becomes `secret.envsafe` next to the original.
+
+Files locked by Env Safety 0.8.0 and older end in `.locked`. They still unlock, and become `.envsafe` the next
+time they are locked.
 
 The vault keeps the previous version of each file as `<blob>.prev`.
 
@@ -176,7 +179,7 @@ cannot read `~/.env-safety`.
 | *deleted by something other than Env Safety* | Locked files disappeared | Restore from backup; the vault may hold `.prev` copies |
 | *not locked because git tracks them* | The secret is in git history | Rotate it, `git rm --cached <file>`, add to `.gitignore` |
 | *had been staged for commit … unstaged it and locked it* | Something ran `git add` on a secret | Check `.gitignore`; run `git gc --prune=now` to drop the staged copy |
-| *NOT locked, still readable … same file as: X* | A hard link or symlink | Delete the other name, lock again, rotate if you did not make it |
+| *NOT locked, still readable … (other name(s) on disk)* | A hard link or symlink | Find the other name (`fsutil hardlink list <file>` on Windows), delete it, lock again; rotate if you did not make it |
 | *copies of locked secret values are still readable in: X* | A secret value was copied into a normal file | **Protect and lock**, or remove the value and rotate the secret |
 | *is a template … but holds a real value* | A template contains a real secret | It is locked; replace the values with placeholders after unlocking |
 | *link leading outside the project* | A folder became a junction/symlink | Remove the link; unlock again |
@@ -230,7 +233,7 @@ project's `.vscode/settings.json`, which an agent can edit, cannot change them.
 | `envSafety.customPatterns` | `[]` | add-only | Extra globs to lock, e.g. `config/secrets.yml` |
 | `envSafety.allowList` | templates | user only | Globs never locked (unless they hold a real secret value) |
 | `envSafety.exclude` | `**/{node_modules,.git,vendor,.venv,venv,Pods}/**` | user only | Folders skipped when scanning |
-| `envSafety.storage` | `vault` | user only | `vault` (outside the project) or `inPlace` (`<file>.locked`) |
+| `envSafety.storage` | `vault` | user only | `vault` (outside the project) or `inPlace` (`<file>.envsafe`) |
 | `envSafety.vaultPath` | `~/.env-safety/vault` | machine | Folder of all vaults |
 | `envSafety.vaultId` | set on first lock | project | This project's vault id; safe to commit; pinned on first use |
 | `envSafety.keyringPath` | `~/.env-safety/keyring.json` | machine | Keyring location |
@@ -261,6 +264,15 @@ or hard link, it is a template, it is in an excluded folder, or no preset covers
 
 **I get a "copies of locked secret values" warning for a file I meant to contain the value.** Choose
 *Protect and lock*, or better, load the value from the environment instead of hard-coding it.
+
+**My antivirus or EDR (CrowdStrike, Defender for Endpoint…) blocks locking.**
+Locking reads a file, writes an encrypted copy and deletes the original: the same steps ransomware takes, so
+behaviour-based endpoint security can flag it even though nothing is wrong. Env Safety avoids the obvious
+signals: encrypted files end in `.envsafe`, not the ransomware-style `.locked`, and locking starts no program
+other than `git`. If it is still blocked, ask your security team to allow it. Give them the detection name
+and the paths `%USERPROFILE%\.env-safety\` and `%USERPROFILE%\.vscode\extensions\seakkimhour.env-safety-*`.
+Locking that runs on its own can be turned off in your User settings: `envSafety.lockOnStartup`,
+`envSafety.lockOnClose`, and `envSafety.autoLockMinutes` (set to 0).
 
 **Does it work with Cursor / Windsurf?** Yes, they are VS Code–based. Agent detection covers their
 terminals; built-in AI features count as AI extensions.

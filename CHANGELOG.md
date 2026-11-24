@@ -3,6 +3,19 @@
 All notable changes to Env Lock. Security fixes reference the attack IDs in
 [docs/redteam-report.md](docs/redteam-report.md).
 
+## Unreleased
+
+### Fewer false alarms from endpoint security (CrowdStrike…)
+Locking looks like ransomware to behaviour-based EDR: read a file, write an encrypted copy, delete the original.
+- **Encrypted files end in `.envsafe`, not `.locked`** (a common ransomware extension), in place and in the vault.
+  Files and vault blobs locked by 0.8.0 and older (`.locked`) still unlock, and are replaced by `.envsafe`
+  the next time they are locked.
+- **No more `fsutil`.** The warning about a linked secret file says how many other names it has; it no longer
+  runs `fsutil hardlink list` to name them (the message tells you how to).
+- **`taskkill` runs from `%SystemRoot%\System32`** when *Run a command with secrets* stops its program, never a
+  `taskkill.exe` found on `PATH`.
+- User guide: what to do when an EDR still blocks locking.
+
 ## 0.8.0 — 2026-11-23
 
 ### Renamed: Env Lock is now **Env Safety**

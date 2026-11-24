@@ -5,6 +5,7 @@ node_modules/**
 .vscode/**
 tsconfig.json
 **/*.map
+**/*.envsafe
 **/*.locked
 **/.env*
 *.vsix

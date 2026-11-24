@@ -59,7 +59,7 @@ const allowed = (p) => allowRes.some((r) => r.test(p));
 
 function isSecret(arg) {
   const p = norm(arg);
-  if (!p || p.endsWith('.locked')) return false;
+  if (!p || p.endsWith('.envsafe') || p.endsWith('.locked')) return false;
   if (/[*?[{]/.test(p)) {
     if (!/[^*?/.[\\]{}]/.test(p)) return false; // bare wildcard like "*"
     let r;

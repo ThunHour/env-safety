@@ -138,7 +138,7 @@ const commands = {
     'Test 6: delete every locked file in the vault.',
     () => {
       const v = vault();
-      const gone = fs.readdirSync(v.dir).filter((n) => n.endsWith('.locked'));
+      const gone = fs.readdirSync(v.dir).filter((n) => (n.endsWith('.envsafe') || n.endsWith('.locked')));
       for (const n of gone) fs.unlinkSync(path.join(v.dir, n));
       console.log(`✔ deleted ${gone.length} locked file(s) (.prev copies kept)`);
     },

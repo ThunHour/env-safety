@@ -5,7 +5,8 @@
  * project, in <vaultRoot>/<id>/, so an AI agent working in the project folder never sees them.
  *
  *   <vaultRoot>/<id>/vault.json        { format, v, salt }   (no secrets, no file names)
- *   <vaultRoot>/<id>/<sha256>.locked   encrypted envelope { path, data, lockedAt }
+ *   <vaultRoot>/<id>/<sha256>.envsafe  encrypted envelope { path, data, lockedAt }
+ *                                      (<sha256>.locked from Env Safety 0.8.0 and older: still read)
  *
  * Blob names are SHA-256(salt || relative path): stable, so re-locking a file replaces its blob,
  * but they do not show which file they hold. The real path is only inside the ciphertext.
@@ -20,7 +21,12 @@ import * as path from 'path';
 import { decryptFile, encryptFile, PrivateKeys, PublicKeys, SignCheck, signLocked, verifyLocked } from './crypto';
 
 export const VAULT_FORMAT = 'env-lock-vault';
-const BLOB_EXT = '.locked';
+/**
+ * Not ".locked": that is a common ransomware extension, and endpoint security (CrowdStrike…) flags a
+ * process that writes encrypted *.locked files and deletes the originals.
+ */
+const BLOB_EXT = '.envsafe';
+const LEGACY_BLOB_EXT = '.locked'; // Env Safety 0.8.0 and older: read, replaced on the next lock
 const META = 'vault.json';
 const TMP = '.envlock-tmp';
 
@@ -60,8 +66,16 @@ export function normalizeRel(rel: string, platform: NodeJS.Platform = process.pl
   return platform === 'win32' ? p.toLowerCase() : p;
 }
 
+const blobHash = (salt: Buffer, rel: string, platform: NodeJS.Platform) =>
+  createHash('sha256').update(salt).update(normalizeRel(rel, platform)).digest('hex');
+
 export function blobName(salt: Buffer, rel: string, platform: NodeJS.Platform = process.platform): string {
-  return createHash('sha256').update(salt).update(normalizeRel(rel, platform)).digest('hex') + BLOB_EXT;
+  return blobHash(salt, rel, platform) + BLOB_EXT;
+}
+
+/** Name the same file had in a vault written by Env Safety 0.8.0 and older. */
+export function legacyBlobName(salt: Buffer, rel: string, platform: NodeJS.Platform = process.platform): string {
+  return blobHash(salt, rel, platform) + LEGACY_BLOB_EXT;
 }
 
 /** Opens (and creates on first use) the vault of one project. */
@@ -102,11 +116,14 @@ export async function vaultPut(
 ): Promise<string> {
   const envelope = JSON.stringify({ path: rel.replace(/\\/g, '/'), data: plain.toString('base64'), lockedAt: signedAt });
   const blob = path.join(v.dir, blobName(v.salt, rel));
+  const legacy = path.join(v.dir, legacyBlobName(v.salt, rel));
   const tmp = blob + TMP;
   const locked = encryptFile(Buffer.from(envelope, 'utf8'), pub);
   await fs.writeFile(tmp, macKey ? signLocked(locked, macKey, vaultBinding(v, rel), signedAt) : locked, { encoding: 'utf8', mode: 0o600 });
-  await fs.copyFile(blob, blob + PREV).catch(() => undefined); // no previous blob: fine
+  // no previous blob: fine; one from an older version: it becomes the .prev copy
+  await fs.copyFile(blob, blob + PREV).catch(() => fs.copyFile(legacy, blob + PREV)).catch(() => undefined);
   await fs.rename(tmp, blob);
+  await fs.unlink(legacy).catch(() => undefined); // replaced by the new blob (never listed twice)
   return blob;
 }
 
@@ -122,7 +139,7 @@ export async function vaultList(v: Vault): Promise<string[]> {
     if (e.code === 'ENOENT') return [];
     throw e;
   }
-  return names.filter((n) => n.endsWith(BLOB_EXT)).map((n) => path.join(v.dir, n));
+  return names.filter((n) => n.endsWith(BLOB_EXT) || n.endsWith(LEGACY_BLOB_EXT)).map((n) => path.join(v.dir, n));
 }
 
 /**
@@ -135,7 +152,10 @@ export async function vaultRead(v: Vault, blob: string, priv: PrivateKeys, macKe
   const j = JSON.parse(decryptFile(text, priv).toString('utf8'));
   if (typeof j.path !== 'string' || typeof j.data !== 'string') throw new Error(`${path.basename(blob)}: not a vault entry.`);
   let sign = verifyLocked(text, macKey, vaultBinding(v, j.path));
-  if (sign.state === 'valid' && path.basename(blob) !== blobName(v.salt, j.path)) sign = { state: 'invalid', signedAt: 0 };
+  const name = path.basename(blob);
+  if (sign.state === 'valid' && name !== blobName(v.salt, j.path) && name !== legacyBlobName(v.salt, j.path)) {
+    sign = { state: 'invalid', signedAt: 0 };
+  }
   return { path: j.path, data: Buffer.from(j.data, 'base64'), lockedAt: Number(j.lockedAt) || 0, sign };
 }
 

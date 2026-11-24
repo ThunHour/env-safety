@@ -171,17 +171,17 @@
       "explorer/context": [
         {
           "command": "envSafety.protectFile",
-          "when": "!explorerResourceIsFolder && resourceExtname != .locked",
+          "when": "!explorerResourceIsFolder && resourceExtname != .envsafe && resourceExtname != .locked",
           "group": "7_envsafety@1"
         },
         {
           "command": "envSafety.unprotectFile",
-          "when": "!explorerResourceIsFolder && resourceExtname != .locked",
+          "when": "!explorerResourceIsFolder && resourceExtname != .envsafe && resourceExtname != .locked",
           "group": "7_envsafety@2"
         },
         {
           "command": "envSafety.unlockFile",
-          "when": "!explorerResourceIsFolder && resourceExtname == .locked",
+          "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.(envsafe|locked)$/",
           "group": "7_envsafety@1"
         },
         {
@@ -198,7 +198,7 @@
         },
         {
           "command": "envSafety.unlockFile",
-          "when": "resourceScheme == file && resourceExtname == .locked",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(envsafe|locked)$/",
           "group": "navigation@-100"
         }
       ],
@@ -210,19 +210,19 @@
         },
         {
           "command": "envSafety.unlockFile",
-          "when": "resourceScheme == file && resourceExtname == .locked",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(envsafe|locked)$/",
           "group": "7_envsafety@0"
         },
         {
           "command": "envSafety.protectFile",
-          "when": "resourceScheme == file && resourceExtname != .locked",
+          "when": "resourceScheme == file && resourceExtname != .envsafe && resourceExtname != .locked",
           "group": "7_envsafety@1"
         }
       ],
       "commandPalette": [
         {
           "command": "envSafety.unlockFile",
-          "when": "resourceExtname == .locked"
+          "when": "resourceExtname =~ /^\\.(envsafe|locked)$/"
         },
         {
           "command": "envSafety.lockFile",
@@ -303,7 +303,7 @@
           ],
           "enumDescriptions": [
             "Move locked files out of the project into an encrypted vault (like .NET User Secrets, but encrypted). Agents working in the project see nothing.",
-            "Keep locked files next to the original as <file>.locked."
+            "Keep locked files next to the original as <file>.envsafe."
           ],
           "default": "vault",
           "scope": "application",
@@ -487,6 +487,7 @@
         "**/id_rsa": true,
         "**/id_ecdsa": true,
         "**/id_ed25519": true,
+        "**/*.envsafe": true,
         "**/*.locked": true
       }
     }

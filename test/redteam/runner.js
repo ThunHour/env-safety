@@ -112,7 +112,7 @@ function vault() {
   return { id, dir, salt: Buffer.from(meta.salt, 'base64') };
 }
 const blobOf = (v, rel) => path.join(v.dir, V.blobName(v.salt, rel));
-const blobs = (v) => fs.readdirSync(v.dir).filter((n) => n.endsWith('.locked'));
+const blobs = (v) => fs.readdirSync(v.dir).filter((n) => n.endsWith('.envsafe') || n.endsWith('.locked'));
 
 async function lockAll() {
   policy = {};
@@ -139,7 +139,7 @@ function setProject(k, v) {
 }
 /** Puts the two test secrets back (plaintext) and locks everything: the state every test starts from. */
 async function baseline() {
-  for (const n of fs.readdirSync(PROJECT)) if (n.endsWith('.locked')) fs.unlinkSync(P(n));
+  for (const n of fs.readdirSync(PROJECT)) if (n.endsWith('.envsafe') || n.endsWith('.locked')) fs.unlinkSync(P(n));
   if (!exists(P('.env'))) fs.writeFileSync(P('.env'), ENV);
   if (!exists(P('.env.production'))) fs.writeFileSync(P('.env.production'), ENV_PROD);
   await lockAll();
@@ -472,7 +472,7 @@ T('T22', 'Env Safety commands run by ANOTHER extension (F4)', 'A01', async (c) =
   fs.writeFileSync(victim, 'my thesis');
   const m = mark();
   await cmd('envSafety.lockFile', vscode.Uri.file(victim));
-  c.expect(read(victim) === 'my thesis' && !exists(victim + '.locked'), 'lockFile on a file outside the workspace: refused, file intact');
+  c.expect(read(victim) === 'my thesis' && !exists(victim + '.envsafe') && !exists(victim + '.locked'), 'lockFile on a file outside the workspace: refused, file intact');
   c.expect(saw(m, /not a protected secret file/).length, 'warned "not a protected secret file"');
   fs.writeFileSync(P('notes.txt'), 'notes');
   await cmd('envSafety.protectFile', vscode.Uri.file(P('notes.txt')));
@@ -704,6 +704,7 @@ T('X7', 'Agent renames .env to .env.example (allow-listed) while unlocked', 'A04
   c.expect(!kept || shown(m, /\.env\.example/).length, `secret in an allow-listed file is locked or reported: ${(shown(m, /\.env\.example/)[0]?.text || (kept ? 'NOT reported' : 'locked')).slice(0, 160)}`);
   fs.rmSync(P('.env.example'), { force: true });
   fs.rmSync(P('.env.example.locked'), { force: true });
+  fs.rmSync(P('.env.example.envsafe'), { force: true });
   await baseline();
 });
 
@@ -874,7 +875,8 @@ TM('M3', 'A file locked by Env Lock unlocks in Env Safety, and locks again', 'A0
   c.expect(readJson(PROJECT_SETTINGS)['envSafety.vaultId'] === id, 'project now has envSafety.vaultId = the Env Lock vault id');
   await lockAll();
   c.expect(!exists(P('.env')), 'locked again');
-  c.expect(fs.readdirSync(path.join(VAULT_ROOT, id)).some((n) => n.endsWith('.locked')), 'into the vault under ~/.env-safety');
+  c.expect(fs.readdirSync(path.join(VAULT_ROOT, id)).some((n) => n.endsWith('.envsafe')), 'into the vault under ~/.env-safety, as .envsafe');
+  c.expect(!fs.readdirSync(path.join(VAULT_ROOT, id)).some((n) => n.endsWith('.locked')), 'the old .locked blob was replaced');
 });
 
 // ================================================================ run

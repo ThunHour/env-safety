@@ -60,7 +60,19 @@ import {
   vaultRead,
 } from './vault';
 
-const LOCKED = '.locked';
+/**
+ * Encrypted files are <file>.envsafe. Not ".locked": that is a common ransomware extension, and
+ * endpoint security (CrowdStrike…) flags a process that writes *.locked files and deletes the originals.
+ */
+const LOCKED = '.envsafe';
+const LOCKED_EXTS = [LOCKED, '.locked']; // .locked: Env Safety 0.8.0 and older, still unlocked
+/** The locked-file extension `p` ends with, or undefined. */
+const lockedExt = (p: string) => LOCKED_EXTS.find((e) => p.toLowerCase().endsWith(e));
+/** Path of the readable file a locked file unlocks to. */
+const plainOf = (p: string) => {
+  const e = lockedExt(p);
+  return e ? p.slice(0, -e.length) : p;
+};
 const TMP = '.envlock-tmp';
 const MIN_PASS = 10;
 
@@ -344,7 +356,7 @@ interface VaultItem {
 
 interface SecretFiles {
   plain: vscode.Uri[];
-  locked: vscode.Uri[]; // encrypted in place: <file>.locked next to where the file was
+  locked: vscode.Uri[]; // encrypted in place: <file>.envsafe (or .locked) next to where the file was
   vault: VaultItem[]; // encrypted outside the project, in the vault
 }
 
@@ -579,7 +591,7 @@ async function findSecretFiles(): Promise<SecretFiles> {
     const lower = r.toLowerCase();
     if (lower.endsWith(TMP)) continue;
     const u = vscode.Uri.file(path.join(folder.uri.fsPath, r));
-    if (lower.endsWith(LOCKED)) candidates.push(u);
+    if (lockedExt(lower)) candidates.push(u);
     else if (matchesAny(r, patterns)) (matchesAny(r, allow) ? templates : plain).push(u);
   }
   plain.push(...(await templatesWithSecrets(templates)));
@@ -651,7 +663,7 @@ async function huntCopies() {
     for (const { folder, rel: r } of await workspaceFiles()) {
       if (read >= 5000) break;
       const lower = r.toLowerCase();
-      if (lower.endsWith(LOCKED) || lower.endsWith(TMP) || matchesAny(r, patterns)) continue;
+      if (lockedExt(lower) || lower.endsWith(TMP) || matchesAny(r, patterns)) continue;
       const p = path.join(folder.uri.fsPath, r);
       const text = await smallText(p, 64 * 1024);
       if (text === undefined) continue;
@@ -951,7 +963,7 @@ async function changePassphraseCommand() {
 // ================================================================= lock / unlock
 
 /**
- * Encrypts each file into its folder's vault, or next to it (<file>.locked) in "inPlace" mode,
+ * Encrypts each file into its folder's vault, or next to it (<file>.envsafe) in "inPlace" mode,
  * then deletes the plaintext. create=false: never create a vault id (used during shutdown).
  */
 async function lockFiles(paths: string[], pub: PublicKeys, macKey: Buffer | undefined, create = true): Promise<void> {
@@ -998,6 +1010,7 @@ async function lockFiles(paths: string[], pub: PublicKeys, macKey: Buffer | unde
         const locked = encryptFile(data, pub);
         await fs.writeFile(tmp, macKey ? signLocked(locked, macKey, bind, signedAt) : locked, 'utf8');
         await fs.rename(tmp, lockedPath);
+        await fs.unlink(p + '.locked').catch(() => undefined); // older version's name: replaced, as before
       }
       if (macKey) prints = mergePrints(prints, printsOf(macKey, data.toString('utf8')));
       data.fill(0);
@@ -1014,31 +1027,12 @@ async function lockFiles(paths: string[], pub: PublicKeys, macKey: Buffer | unde
   }
 }
 
-/** Other names of a hard-linked file (Windows: fsutil; elsewhere unknown). */
-function hardLinkNames(file: string): Promise<string[]> {
-  if (process.platform !== 'win32') return Promise.resolve([]);
-  return new Promise((resolve) =>
-    execFile('fsutil', ['hardlink', 'list', file], { timeout: 5000, windowsHide: true }, (err, stdout) => {
-      if (err) return resolve([]);
-      const drive = path.parse(path.resolve(file)).root.replace(/[\\/]$/, '');
-      const me = path.resolve(file).toLowerCase();
-      resolve(
-        String(stdout)
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean)
-          .map((l) => (/^[\\/]/.test(l) ? drive + l : l))
-          .filter((l) => path.resolve(l).toLowerCase() !== me)
-      );
-    })
-  );
-}
-
 let warnedLinked = '';
 /**
  * A secret file that is a link or has a second name (hard link) is never encrypted: it could point
  * at a file outside the project (red-team R4). But then its plaintext stays readable, under this
  * name AND the other one, which an agent may have made while it was unlocked (red-team X2): say so.
+ * The other names are not looked up: that needs `fsutil`, a program endpoint security watches.
  */
 async function warnLinked(files: string[]) {
   const sig = files.join('|');
@@ -1046,18 +1040,21 @@ async function warnLinked(files: string[]) {
   warnedLinked = sig;
   const parts: string[] = [];
   for (const f of files) {
-    const others = await hardLinkNames(f);
-    parts.push(
-      vscode.workspace.asRelativePath(f) +
-        (others.length ? ` (same file as: ${others.map((o) => vscode.workspace.asRelativePath(o)).join(', ')})` : '')
-    );
+    const st = await fs.lstat(f).catch(() => undefined);
+    const kind = st?.isSymbolicLink()
+      ? 'a link'
+      : st && st.nlink > 1
+        ? `${st.nlink - 1} other name(s) on disk`
+        : 'a link or hard link';
+    parts.push(`${vscode.workspace.asRelativePath(f)} (${kind})`);
   }
   log.error(`NOT locked, link or hard link, plaintext still readable: ${parts.join('; ')}`);
   void vscode.window.showErrorMessage(
     `Env Safety: NOT locked, still readable: ${parts.join('; ')}. The file is a link or has a second name on disk (a hard link), ` +
       'so its secret can also be read under the other name. Something may have made it while your secrets were unlocked. ' +
       'Env Safety never encrypts a linked file (it could be a link to a file outside the project). ' +
-      'Delete the other name(s) and lock again; rotate the secret if you did not make the link.'
+      'Delete the other name(s) and lock again; rotate the secret if you did not make the link.' +
+      (process.platform === 'win32' ? ' To list the other names: fsutil hardlink list <file>.' : ' To find the other names: find / -samefile <file>.')
   );
 }
 
@@ -1101,10 +1098,10 @@ async function checkMissing() {
   if (!missing.length) return;
   const names = missing.map((m) => m.label).join(', ');
   log.error(`Locked file(s) disappeared: ${names}`);
-  const inVault = missing.some((m) => m.lockedPath !== m.plainPath + LOCKED);
+  const inVault = missing.some((m) => !samePath(plainOf(m.lockedPath), m.plainPath));
   const pick = await vscode.window.showErrorMessage(
     `Env Safety: locked secret file(s) were deleted by something other than Env Safety: ${names}. ` +
-      (inVault ? 'The vault may still hold the previous version (<name>.locked.prev). ' : '') +
+      (inVault ? `The vault may still hold the previous version (<name>${LOCKED}.prev or <name>.locked.prev). ` : '') +
       'Restore from your backup ("Env Safety: Back up keys and vault").',
     ...(inVault ? ['Show vault folder'] : [])
   );
@@ -1504,12 +1501,12 @@ async function unlockCommand(only?: { locked: vscode.Uri[]; vault: VaultItem[] }
       try {
         const text = await fs.readFile(u.fsPath, 'utf8');
         all.push({
-          target: u.fsPath.slice(0, -LOCKED.length),
+          target: plainOf(u.fsPath),
           data: decryptFile(text, opened.priv),
           remove: u.fsPath,
           label: rel(u),
-          bind: inPlaceBinding(u.fsPath.slice(0, -LOCKED.length)),
-          sign: verifyLocked(text, macKey, inPlaceBinding(u.fsPath.slice(0, -LOCKED.length))),
+          bind: inPlaceBinding(plainOf(u.fsPath)),
+          sign: verifyLocked(text, macKey, inPlaceBinding(plainOf(u.fsPath))),
         });
       } catch (e) {
         if (e instanceof WrongKeyError) foreign.push(rel(u));
@@ -1613,7 +1610,7 @@ async function protectFileCommand(uri?: vscode.Uri) {
 async function unprotectFileCommand(uri?: vscode.Uri) {
   uri = targetUri(uri);
   if (!uri || uri.scheme !== 'file') return;
-  if (uri.fsPath.endsWith(LOCKED)) {
+  if (lockedExt(uri.fsPath)) {
     return void vscode.window.showWarningMessage('Env Safety: unlock this file first (right-click → Env Safety: Unlock this file).');
   }
   const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -1647,7 +1644,7 @@ const samePath = (a: string, b: string) => (process.platform === 'win32' ? a.toL
 /**
  * Commands can be run by any extension (AI ones too), with any file. Lock / unlock only what Env
  * Lock itself lists as a protected file of this workspace, so they cannot encrypt-and-delete an
- * arbitrary file, or unlock a planted .locked file somewhere else on disk.
+ * arbitrary file, or unlock a planted locked file somewhere else on disk.
  */
 async function protectedUri(uri: vscode.Uri, kind: 'plain' | 'locked'): Promise<vscode.Uri | undefined> {
   const found = (await findSecretFiles())[kind];
@@ -1664,23 +1661,23 @@ async function protectedUri(uri: vscode.Uri, kind: 'plain' | 'locked'): Promise<
 
 async function lockFileCommand(uri?: vscode.Uri) {
   uri = targetUri(uri);
-  if (!uri || uri.scheme !== 'file' || uri.fsPath.endsWith(LOCKED)) return;
+  if (!uri || uri.scheme !== 'file' || lockedExt(uri.fsPath)) return;
   const hit = await protectedUri(uri, 'plain');
   if (hit) await lockCommand(undefined, [hit]);
 }
 
 async function unlockFileCommand(uri?: vscode.Uri) {
   uri = targetUri(uri);
-  if (!uri || uri.scheme !== 'file' || !uri.fsPath.endsWith(LOCKED)) return;
+  if (!uri || uri.scheme !== 'file' || !lockedExt(uri.fsPath)) return;
   if (!(await protectedUri(uri, 'locked'))) return;
   const wasActive = vscode.window.activeTextEditor?.document.uri.fsPath === uri.fsPath;
   await unlockCommand({ locked: [uri], vault: [] });
-  const plainUri = vscode.Uri.file(uri.fsPath.slice(0, -LOCKED.length));
+  const plainUri = vscode.Uri.file(plainOf(uri.fsPath));
   try {
     await fs.access(uri.fsPath);
     return; // still locked: cancelled or failed
   } catch {
-    /* .locked file is gone: unlocked */
+    /* locked file is gone: unlocked */
   }
   // Swap the tab of the encrypted file for the readable one.
   for (const g of vscode.window.tabGroups.all) {
@@ -1821,7 +1818,7 @@ async function runWithSecretsCommand() {
 
   // Decrypt locked dotenv files up front (vault names are encrypted, so the vault must be opened to
   // know what is in it), and keep only those whose signature shows you locked them.
-  const lockedDotenv = locked.filter((u) => isDotenv(u.fsPath.slice(0, -LOCKED.length)));
+  const lockedDotenv = locked.filter((u) => isDotenv(plainOf(u.fsPath)));
   const decrypted: Decrypted[] = [];
   const badSig: string[] = [];
   if (vault.length || lockedDotenv.length) {
@@ -1831,12 +1828,12 @@ async function runWithSecretsCommand() {
       for (const u of lockedDotenv) {
         const text = await fs.readFile(u.fsPath, 'utf8');
         decrypted.push({
-          target: u.fsPath.slice(0, -LOCKED.length),
+          target: plainOf(u.fsPath),
           data: decryptFile(text, priv!),
           remove: u.fsPath,
           label: rel(u),
-          bind: inPlaceBinding(u.fsPath.slice(0, -LOCKED.length)),
-          sign: verifyLocked(text, macKey, inPlaceBinding(u.fsPath.slice(0, -LOCKED.length))),
+          bind: inPlaceBinding(plainOf(u.fsPath)),
+          sign: verifyLocked(text, macKey, inPlaceBinding(plainOf(u.fsPath))),
         });
       }
       decrypted.push(...(await readVault(vault, priv!, [], [])));
@@ -2074,8 +2071,14 @@ function runWithSecretEnv(command: string, cwd: string, secretEnv: Record<string
   const out = (s: string) => write.fire(s.replace(/\r?\n/g, '\r\n'));
   const stop = () => {
     if (!child?.pid || exited) return;
-    if (process.platform === 'win32') execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => undefined);
-    else {
+    if (process.platform === 'win32') {
+      // Node cannot end a process tree on Windows by itself: child.kill() ends only cmd.exe and leaves
+      // the dev server running, secrets in its environment. A gentle taskkill (no /F) cannot end console
+      // programs, and once cmd.exe is gone /T no longer finds its children: force the whole tree at once.
+      // Full System32 path: the real taskkill, never one found on PATH or in the project.
+      const taskkill = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe');
+      execFile(taskkill, ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+    } else {
       try {
         process.kill(-child.pid, 'SIGTERM'); // the whole process group (dev servers start children)
       } catch {
@@ -2242,7 +2245,7 @@ async function doRefreshStatus() {
 
 function rebuildWatcher(ctx: vscode.ExtensionContext) {
   watcher?.dispose();
-  watcher = vscode.workspace.createFileSystemWatcher(combinedGlob([...activePatterns(), `**/*${LOCKED}`]));
+  watcher = vscode.workspace.createFileSystemWatcher(combinedGlob([...activePatterns(), ...LOCKED_EXTS.map((e) => `**/*${e}`)]));
   const debounced = () => {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => void refreshStatus(), 300);

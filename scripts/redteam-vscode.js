@@ -216,7 +216,7 @@ function launch(phase, runnerDir, extraEnv, timeoutMs) {
 // ---------------------------------------------------------------- checks outside VS Code
 
 function plaintextLeft() {
-  return fs.readdirSync(PROJECT).filter((n) => n.startsWith('.env') && !n.endsWith('.locked'));
+  return fs.readdirSync(PROJECT).filter((n) => n.startsWith('.env') && !n.endsWith('.envsafe') && !n.endsWith('.locked'));
 }
 
 function bundleHashCheck() {

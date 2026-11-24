@@ -297,6 +297,7 @@ test('Claude Code hook blocks protected files of any language, allows the rest',
     ['Read', { file_path: '/proj/.env.example' }],
     ['Read', { file_path: '/proj/src/index.ts' }],
     ['Read', { file_path: '/proj/.env.locked' }],
+    ['Read', { file_path: '/proj/.env.envsafe' }],
     ['Read', { file_path: '/proj/src/config/master.key.ts' }],
     ['Edit', { file_path: '/proj/src/a.ts', old_string: 'process.env.X', new_string: 'y' }],
     ['Bash', { command: 'node -e "console.log(process.env.NODE_ENV)"' }],
@@ -319,7 +320,7 @@ test('vault: lock into vault with public key only, read back with passphrase', a
   assert.ok(blob.startsWith(v.dir));
   const raw = fs.readFileSync(blob, 'utf8');
   assert.ok(!raw.includes('sk-live-123') && !raw.includes('.env'), 'neither secret nor file name visible');
-  assert.ok(!path.basename(blob).includes('env'), 'blob name does not reveal the file');
+  assert.ok(/^[0-9a-f]{64}\.envsafe$/.test(path.basename(blob)), 'blob name does not reveal the file (hash + fixed extension)');
   assert.ok(!fs.readFileSync(path.join(v.dir, 'vault.json'), 'utf8').includes('.env'));
   const env = await V.vaultRead(v, blob, await C.openKeyring(keyring, PASS));
   assert.strictEqual(env.path, 'api/.env');
@@ -428,6 +429,36 @@ test('vault blobs are signed, bound to their vault, path and blob name', async (
   assert.strictEqual((await V.vaultList(v)).filter((b) => b.endsWith('.prev')).length, 0, '.prev is not listed as a locked file');
 });
 
+test('vault blobs are .envsafe (not the ransomware-like .locked); .locked blobs of 0.8.0 still read, then replaced', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'envlock-vault-'));
+  const v = await V.openVault(root, V.newVaultId());
+  const macKey = C.newMacKey();
+  const pub = C.publicKeys(keyring);
+  const priv = await C.openKeyring(keyring, PASS);
+  const blob = await V.vaultPut(v, '.env', SAMPLE, pub, macKey);
+  assert.ok(blob.endsWith('.envsafe') && !blob.endsWith('.locked'));
+
+  // A vault written by 0.8.0: the same blob under its old name.
+  const legacy = path.join(v.dir, V.legacyBlobName(v.salt, '.env'));
+  assert.ok(legacy.endsWith('.locked'));
+  fs.renameSync(blob, legacy);
+  assert.deepStrictEqual(await V.vaultList(v), [legacy], 'legacy blob is listed');
+  const env = await V.vaultRead(v, legacy, priv, macKey);
+  assert.ok(env.data.equals(SAMPLE));
+  assert.strictEqual(env.sign.state, 'valid', 'legacy name still verifies');
+
+  // A blob copied under another file's legacy name does not verify.
+  const other = path.join(v.dir, V.legacyBlobName(v.salt, '.env.production'));
+  fs.copyFileSync(legacy, other);
+  assert.strictEqual((await V.vaultRead(v, other, priv, macKey)).sign.state, 'invalid');
+  fs.unlinkSync(other);
+
+  // Locking again writes .envsafe, keeps the old blob as .prev and removes the .locked one.
+  const again = await V.vaultPut(v, '.env', Buffer.from('A=2\n'), pub, macKey);
+  assert.deepStrictEqual(await V.vaultList(v), [again]);
+  assert.ok(!fs.existsSync(legacy) && fs.existsSync(again + '.prev'));
+});
+
 // ------------------------------------------------------------ policy
 
 const Pol = require('../out/policy');
@@ -526,7 +557,7 @@ test('F6 policy: shrinking presets or custom patterns in user settings is a weak
 test('F7 local history never keeps copies of any built-in secret file type', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const ex = pkg.contributes.configurationDefaults['workbench.localHistory.exclude'];
-  for (const p of [...P.ALL_PRESET_PATTERNS, '**/*.locked']) assert.strictEqual(ex[p], true, `local history must exclude ${p}`);
+  for (const p of [...P.ALL_PRESET_PATTERNS, '**/*.envsafe', '**/*.locked']) assert.strictEqual(ex[p], true, `local history must exclude ${p}`);
 });
 
 test('F8 unlock refuses targets that exist or lead outside the project through a link', async () => {

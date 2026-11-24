@@ -38,7 +38,7 @@ opening a file. So Env Safety makes sure the **plaintext isn't on disk** while y
 
 | Layer | What it does | Stops |
 |---|---|---|
-| 🔒 **Encrypt at rest** (main protection) | `secret` → `secret.locked`, plaintext deleted | every agent, every route (tool, shell, script) |
+| 🔒 **Encrypt at rest** (main protection) | `secret` → `secret.envsafe` (in the vault by default), plaintext deleted | every agent, every route (tool, shell, script) |
 | 🪝 **Claude Code hook** | `.claude/hooks/env-guard.js` rejects tool calls touching protected files | accidental reads, `cat .env`, `cat .e*`, `process.env` dumps |
 | 📄 **Deny/ignore rules** | `.claude/settings.json` deny, `.cursorignore`, `.clineignore`, `.geminiignore`, `.aiexclude`, `.codeiumignore`, `.aiderignore` | agents indexing/reading secrets |
 | 🕘 **Local history off** | `workbench.localHistory.exclude` for every built-in secret file type | VS Code keeping plaintext copies |
@@ -122,7 +122,7 @@ The agent rules and the Claude Code hook are regenerated from the active pattern
 | **Set up post-quantum keys** | one time: generate ML-KEM-768 + X25519 keys, choose passphrase (+ key file) |
 | **Lock all secret files** | encrypt everything matched (no passphrase needed) |
 | **Unlock all secret files** | asks first (offers the in-memory terminal instead) → passphrase → restore plaintext → auto-relock after 5 min |
-| **Unlock this file** (right-click `.locked`) | unlock just one file |
+| **Unlock this file** (right-click `.envsafe`) | unlock just one file |
 | **Run a command with secrets** | e.g. `npm run dev`: decrypts dotenv files **in memory** and gives them to that one process only; its output shows in a terminal; files stay locked |
 | **Choose secret file types** / **Show protected files** | presets / list what's matched |
 | **Change passphrase / key file** | re-protect the private key; locked files stay valid |
@@ -179,7 +179,7 @@ agent may be hostile, and defends like this:
 | Read `.env` | Encrypted with ML-KEM-768 + X25519; in vault mode it is not even in the project |
 | Swap `keyring.json` so the next lock encrypts to the agent's key | Your key id is pinned in the OS credential store (VS Code SecretStorage); locking refuses any other keyring |
 | Plant a fake locked file (e.g. `API_URL=https://attacker…`) using your public key | Every locked file is signed (HMAC, key in the credential store); invalid → refused, unsigned → asks you |
-| Rename `.env.production.locked` → `.env.locked`, or copy blobs between vaults | Signatures are bound to the file's path and vault id |
+| Rename `.env.production.envsafe` → `.env.envsafe`, or copy blobs between vaults | Signatures are bound to the file's path and vault id |
 | Put back an old signed version (rollback) | The newest version of each file is recorded outside the project; older ones need your consent |
 | Delete locked files | Detected and reported; the vault keeps `.prev` copies; **Back up keys and vault** |
 | Edit `.vscode/settings.json` to switch protection off | Security settings are read from **user** settings only; a project can only *add* patterns; ignored values are reported |
@@ -200,7 +200,7 @@ agent may be hostile, and defends like this:
 | Rewrite `vault.json` (salt) or the keyring's KDF cost | The vault salt is pinned and re-checked on every scan; KDF parameters are capped |
 | While unlocked, `git add .env` so every later lock skips it (git-tracked files are never locked) | A file staged but never committed is unstaged and locked, and you are told |
 | While unlocked, rename `.env` to `.env.example` (allow-listed) or copy it into `dist/` | Templates holding a real secret value are locked like secrets; build folders are scanned |
-| While unlocked, hard-link `.env` to `notes.txt` (Env Safety never encrypts a linked file) | You are told the file is NOT locked, and under which other name it can be read |
+| While unlocked, hard-link `.env` to `notes.txt` (Env Safety never encrypts a linked file) | You are told the file is NOT locked and has another name on disk |
 | While unlocked, paste a key into `src/config.js` | After each lock Env Safety looks for copies of the locked values (keyed hashes, no plaintext kept) and offers *Protect and lock* |
 | Hide a secret file with a project `.ignore` / `.rgignore` / `search.exclude` / `files.exclude` | Env Safety lists files itself (only your user-level `envSafety.exclude` applies), not through VS Code's search |
 | Empty Env Safety's credential store (delete VS Code's state file, reset, reinstall) so your files look forged | The signing key is derived from your private key and comes back at your next unlock; the wipe is reported at startup |
